@@ -53,17 +53,28 @@ class IcebergMetadataReader:
         metadata_files = []
         for obj in resp.get("Contents", []):
             key = obj["Key"]
-            if re.search(r"v\d+\.metadata\.json$", key):
-                metadata_files.append(key)
+            if key.endswith(".metadata.json"):
+                metadata_files.append((key, obj.get("LastModified", "")))
 
         if not metadata_files:
-            logger.warning("No v*.metadata.json found in s3://%s/%s", bucket, metadata_prefix)
+            logger.warning("No *.metadata.json found in s3://%s/%s", bucket, metadata_prefix)
             return None
 
-        metadata_files.sort(
-            key=lambda k: int(re.search(r"v(\d+)\.metadata\.json$", k).group(1))
-        )
-        return metadata_files[-1]
+        version_match = re.compile(r"v(\d+)\.metadata\.json$")
+        seq_match = re.compile(r"(\d{5})-.*\.metadata\.json$")
+
+        def sort_key(item):
+            key = item[0]
+            m = version_match.search(key)
+            if m:
+                return int(m.group(1))
+            m = seq_match.search(key)
+            if m:
+                return int(m.group(1))
+            return 0
+
+        metadata_files.sort(key=sort_key)
+        return metadata_files[-1][0]
 
     def read_metadata(self, location: str) -> Optional[Dict[str, Any]]:
         """Read the latest metadata.json for an Iceberg table at the given S3 location."""
