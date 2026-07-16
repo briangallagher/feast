@@ -66,6 +66,18 @@ const (
 	SerializationVersion = 3
 )
 
+// CatalogSpec enables the Iceberg REST Catalog API mode on a FeatureStore deployment.
+type CatalogSpec struct {
+	Enabled bool               `json:"enabled"`
+	SSAR    *CatalogSSARConfig `json:"ssar,omitempty"`
+}
+
+// CatalogSSARConfig defines the API group and resources used for SSAR authorization checks.
+type CatalogSSARConfig struct {
+	APIGroup  string   `json:"apiGroup,omitempty"`
+	Resources []string `json:"resources,omitempty"`
+}
+
 // FeatureStoreSpec defines the desired state of FeatureStore
 type FeatureStoreSpec struct {
 	// +kubebuilder:validation:Pattern="^[A-Za-z0-9][A-Za-z0-9_-]*$"
@@ -75,6 +87,7 @@ type FeatureStoreSpec struct {
 	Services        *FeatureStoreServices `json:"services,omitempty"`
 	AuthzConfig     *AuthzConfig          `json:"authz,omitempty"`
 	CronJob         *FeastCronJob         `json:"cronJob,omitempty"`
+	Catalog         *CatalogSpec          `json:"catalog,omitempty"`
 }
 
 // FeastProjectDir defines how to create the feast project directory.

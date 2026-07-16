@@ -70,6 +70,29 @@ const (
 	SerializationVersion = 3
 )
 
+// CatalogSpec enables the Iceberg REST Catalog API mode on a FeatureStore deployment.
+// When enabled, the server exposes catalog endpoints with SSAR authorization.
+// Online and offline stores are skipped — only the registry is deployed.
+type CatalogSpec struct {
+	// Enabled activates catalog mode on this FeatureStore.
+	Enabled bool `json:"enabled"`
+	// SSAR configures the SelfSubjectAccessReview pseudo-resources for catalog authorization.
+	// +optional
+	SSAR *CatalogSSARConfig `json:"ssar,omitempty"`
+}
+
+// CatalogSSARConfig defines the API group and resources used for SSAR authorization checks.
+type CatalogSSARConfig struct {
+	// APIGroup is the Kubernetes API group for SSAR pseudo-resources.
+	// Defaults to "datacatalog.opendatahub.io".
+	// +optional
+	APIGroup string `json:"apiGroup,omitempty"`
+	// Resources is the list of pseudo-resource types for SSAR checks.
+	// Defaults to ["namespaces", "tables", "volumes"].
+	// +optional
+	Resources []string `json:"resources,omitempty"`
+}
+
 // MaterializationConfig controls feature materialization behavior written into feature_store.yaml.
 type MaterializationConfig struct {
 	// Number of rows per batch when writing to the online store during materialization.
@@ -143,6 +166,11 @@ type FeatureStoreSpec struct {
 	// Written into feature_store.yaml for all service pods.
 	// +optional
 	OpenLineage *OpenLineageConfig `json:"openlineage,omitempty"`
+	// Catalog enables the Iceberg REST Catalog API on this FeatureStore.
+	// When enabled, the server exposes /v1/{prefix}/* catalog endpoints with
+	// SSAR-based authorization. Online and offline stores are not deployed.
+	// +optional
+	Catalog *CatalogSpec `json:"catalog,omitempty"`
 }
 
 // FeastProjectDir defines how to create the feast project directory.

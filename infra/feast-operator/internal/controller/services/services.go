@@ -109,34 +109,73 @@ func (feast *FeastServices) Deploy() error {
 	return nil
 }
 
+// IsCatalogMode returns true if the FeatureStore CR has catalog mode enabled.
+func (feast *FeastServices) IsCatalogMode() bool {
+	cr := feast.Handler.FeatureStore
+	return cr.Spec.Catalog != nil && cr.Spec.Catalog.Enabled
+}
+
+// CatalogEnvVars returns the environment variables to inject when catalog mode is enabled.
+func (feast *FeastServices) CatalogEnvVars() []corev1.EnvVar {
+	cr := feast.Handler.FeatureStore
+	vars := []corev1.EnvVar{
+		{Name: "DATACATALOG_ENABLED", Value: "true"},
+		{Name: "DATACATALOG_SSAR_ENABLED", Value: "true"},
+	}
+	if cr.Spec.Catalog.SSAR != nil {
+		if cr.Spec.Catalog.SSAR.APIGroup != "" {
+			vars = append(vars, corev1.EnvVar{
+				Name:  "CATALOG_SSAR_API_GROUP",
+				Value: cr.Spec.Catalog.SSAR.APIGroup,
+			})
+		}
+		if len(cr.Spec.Catalog.SSAR.Resources) > 0 {
+			vars = append(vars, corev1.EnvVar{
+				Name:  "CATALOG_SSAR_RESOURCES",
+				Value: strings.Join(cr.Spec.Catalog.SSAR.Resources, ","),
+			})
+		}
+	}
+	return vars
+}
+
 // reconcileServices validates persistence and deploys or removes each feast
 // service type based on the applied spec.
 func (feast *FeastServices) reconcileServices() error {
 	services := feast.Handler.FeatureStore.Status.Applied.Services
 
-	if feast.isOfflineStore() {
-		if err := feast.validateOfflineStorePersistence(services.OfflineStore.Persistence); err != nil {
-			return err
-		}
-		if err := feast.deployFeastServiceByType(OfflineFeastType); err != nil {
-			return err
-		}
-	} else {
+	if feast.IsCatalogMode() {
 		if err := feast.removeFeastServiceByType(OfflineFeastType); err != nil {
 			return err
 		}
-	}
-
-	if feast.isOnlineStore() {
-		if err := feast.validateOnlineStorePersistence(services.OnlineStore.Persistence); err != nil {
-			return err
-		}
-		if err := feast.deployFeastServiceByType(OnlineFeastType); err != nil {
+		if err := feast.removeFeastServiceByType(OnlineFeastType); err != nil {
 			return err
 		}
 	} else {
-		if err := feast.removeFeastServiceByType(OnlineFeastType); err != nil {
-			return err
+		if feast.isOfflineStore() {
+			if err := feast.validateOfflineStorePersistence(services.OfflineStore.Persistence); err != nil {
+				return err
+			}
+			if err := feast.deployFeastServiceByType(OfflineFeastType); err != nil {
+				return err
+			}
+		} else {
+			if err := feast.removeFeastServiceByType(OfflineFeastType); err != nil {
+				return err
+			}
+		}
+
+		if feast.isOnlineStore() {
+			if err := feast.validateOnlineStorePersistence(services.OnlineStore.Persistence); err != nil {
+				return err
+			}
+			if err := feast.deployFeastServiceByType(OnlineFeastType); err != nil {
+				return err
+			}
+		} else {
+			if err := feast.removeFeastServiceByType(OnlineFeastType); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -567,6 +606,9 @@ func (feast *FeastServices) setContainer(containers *[]corev1.Container, feastTy
 		volumeMounts := feast.getVolumeMounts(feastType)
 		if len(volumeMounts) > 0 {
 			container.VolumeMounts = append(container.VolumeMounts, volumeMounts...)
+		}
+		if feastType == RegistryFeastType && feast.IsCatalogMode() {
+			container.Env = append(container.Env, feast.CatalogEnvVars()...)
 		}
 		*containers = append(*containers, *container)
 	}
