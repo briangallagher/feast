@@ -50,8 +50,13 @@ def _columns_to_iceberg_schema(
 # --- Project <-> Namespace ---
 
 
-def project_to_namespace_response(project: Project) -> NamespaceResponse:
+def project_to_namespace_response(
+    project: Project, collection: Optional[str] = None
+) -> NamespaceResponse:
     properties: Dict[str, str] = dict(project.tags) if project.tags else {}
+    internal_keys = [k for k in properties if k.startswith("_ns_meta_")]
+    for k in internal_keys:
+        del properties[k]
     if project.description:
         properties["description"] = project.description
     if project.owner:
@@ -62,8 +67,9 @@ def project_to_namespace_response(project: Project) -> NamespaceResponse:
     updated_ms = _timestamp_ms(getattr(project, "last_updated_timestamp", None))
     if updated_ms:
         properties["updated_at"] = str(updated_ms)
+    ns = [collection] if collection else [project.name]
     return NamespaceResponse(
-        namespace=[project.name],
+        namespace=ns,
         properties=properties,
     )
 

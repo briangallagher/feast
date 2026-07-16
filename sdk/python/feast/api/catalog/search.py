@@ -84,8 +84,9 @@ def _matches_property_filters(tags: dict, filters: List[str]) -> bool:
 def get_search_router(store: FeatureStore) -> APIRouter:
     router = APIRouter(tags=["iceberg-catalog-search"])
 
-    @router.get("/search")
+    @router.get("/{prefix}/search")
     def search_catalog(
+        prefix: str,
         query: str = Query(
             default="",
             description="Text search query (matches name, description, and property values). Empty string returns all assets.",
@@ -124,58 +125,62 @@ def get_search_router(store: FeatureStore) -> APIRouter:
         - **Pagination**: `?page=1&limit=10` for large catalogs
         - **Empty query**: `?query=` returns all assets (useful with property filters)
         """
-        projects = store.registry.list_projects(allow_cache=True)
-        project_names = [p.name for p in projects]
+        try:
+            store.registry.get_project(prefix, allow_cache=True)
+        except Exception:
+            return SearchResponse(
+                query=query, results=[], total=0, page=page, limit=limit
+            )
 
-        if namespaces:
-            project_names = [n for n in project_names if n in namespaces]
+        datasets = store.registry.list_saved_datasets(
+            project=prefix,
+            allow_cache=True,
+            tags={CATALOG_MANAGED_TAG: "true"},
+        )
 
         scored_results: list[tuple[int, SearchResult]] = []
 
-        for project_name in project_names:
-            datasets = store.registry.list_saved_datasets(
-                project=project_name,
-                allow_cache=True,
-                tags={CATALOG_MANAGED_TAG: "true"},
-            )
+        for ds in datasets:
+            ds_asset_type = ds.tags.get("asset_type", "table")
+            description = ds.tags.get("comment") or ds.tags.get("description")
+            ds_ns = ds.namespace or DEFAULT_SCHEMA
 
-            for ds in datasets:
-                ds_asset_type = ds.tags.get("asset_type", "table")
-                description = ds.tags.get("comment") or ds.tags.get("description")
+            if namespaces and ds_ns not in namespaces:
+                continue
 
-                if asset_type and ds_asset_type != asset_type:
+            if asset_type and ds_asset_type != asset_type:
+                continue
+
+            if properties and not _matches_property_filters(ds.tags, properties):
+                continue
+
+            if query:
+                score = _compute_match_score(query, ds.name, description or "", ds.tags)
+                if score == 0:
                     continue
+            else:
+                score = 50
 
-                if properties and not _matches_property_filters(ds.tags, properties):
-                    continue
+            ns = [ds_ns]
+            props = {
+                k: v
+                for k, v in ds.tags.items()
+                if k not in (CATALOG_MANAGED_TAG, "asset_type")
+            }
 
-                if query:
-                    score = _compute_match_score(query, ds.name, description or "", ds.tags)
-                    if score == 0:
-                        continue
-                else:
-                    score = 50
-
-                ns = [project_name, ds.namespace or DEFAULT_SCHEMA]
-                props = {
-                    k: v
-                    for k, v in ds.tags.items()
-                    if k not in (CATALOG_MANAGED_TAG, "asset_type")
-                }
-
-                scored_results.append(
-                    (
-                        score,
-                        SearchResult(
-                            type=ds_asset_type,
-                            namespace=ns,
-                            name=ds.name,
-                            description=description,
-                            properties=props,
-                            score=score,
-                        ),
-                    )
+            scored_results.append(
+                (
+                    score,
+                    SearchResult(
+                        type=ds_asset_type,
+                        namespace=ns,
+                        name=ds.name,
+                        description=description,
+                        properties=props,
+                        score=score,
+                    ),
                 )
+            )
 
         if sort_by == "name":
             scored_results.sort(key=lambda x: x[1].name)

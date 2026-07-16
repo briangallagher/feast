@@ -120,14 +120,29 @@ class RenameTableRequest(BaseModel):
     destination: TableIdentifier
 
 
-class UpdateTableRequest(BaseModel):
-    description: Optional[str] = None
-    owner: Optional[str] = None
-    location: Optional[str] = None
-    data_source_format: Optional[str] = None
-    data_source_ref: Optional[str] = None
+class TableUpdate(BaseModel):
+    action: str
+    updates: Optional[Dict[str, str]] = None
+    removals: Optional[List[str]] = None
     schema_: Optional[IcebergSchema] = Field(default=None, alias="schema")
-    properties: Optional[Dict[str, str]] = None
+
+    model_config = {"populate_by_name": True}
+
+
+class TableRequirement(BaseModel):
+    type: str
+    ref: Optional[str] = None
+    uuid: Optional[str] = None
+    last_assigned_field_id: Optional[int] = Field(
+        default=None, alias="last-assigned-field-id"
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class UpdateTableRequest(BaseModel):
+    requirements: Optional[List[TableRequirement]] = None
+    updates: List[TableUpdate]
 
     model_config = {"populate_by_name": True}
 
@@ -138,6 +153,7 @@ class UpdateTableRequest(BaseModel):
 class CatalogConfig(BaseModel):
     defaults: Dict[str, str] = {}
     overrides: Dict[str, str] = {}
+    endpoints: Optional[List[str]] = None
 
 
 # --- Volume models ---

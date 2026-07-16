@@ -24,13 +24,15 @@ from feast.api.catalog.models import (
     TableIdentifier,
     UpdateTableRequest,
 )
-from feast.api.catalog.namespaces import DEFAULT_SCHEMA, resolve_namespace
+from feast.api.catalog.namespaces import DEFAULT_SCHEMA, decode_namespace
 from feast.errors import FeastObjectNotFoundException
 from feast.saved_dataset import SavedDataset
 
 logger = logging.getLogger(__name__)
 
 TABLE_ASSET_TYPE = "table"
+
+SUPPORTED_UPDATE_ACTIONS = {"set-properties", "remove-properties"}
 
 
 def _is_table(ds: SavedDataset) -> bool:
@@ -44,46 +46,47 @@ def get_table_router(
 ) -> APIRouter:
     router = APIRouter(tags=["iceberg-catalog-tables"])
 
-    def _ensure_namespace_exists(namespace: str) -> None:
+    def _ensure_project_exists(prefix: str) -> None:
         try:
-            store.registry.get_project(namespace, allow_cache=True)
+            store.registry.get_project(prefix, allow_cache=True)
         except FeastObjectNotFoundException:
-            raise NamespaceNotFoundException(namespace)
+            raise NamespaceNotFoundException(prefix)
 
-    @router.get("/namespaces/{namespace}/namespaces/{schema}/tables")
-    def list_tables(namespace: str, schema: str) -> ListTablesResponse:
-        project = resolve_namespace(namespace, schema)
-        _ensure_namespace_exists(project)
+    @router.get("/{prefix}/namespaces/{namespace}/tables")
+    def list_tables(prefix: str, namespace: str) -> ListTablesResponse:
+        _ensure_project_exists(prefix)
+        ns_parts = decode_namespace(namespace)
+        ns_name = ns_parts[0] if ns_parts else namespace
         datasets = store.registry.list_saved_datasets(
-            project=project,
+            project=prefix,
             allow_cache=False,
             tags={CATALOG_MANAGED_TAG: "true", "asset_type": TABLE_ASSET_TYPE},
-            namespace=schema,
+            namespace=ns_name,
         )
         return ListTablesResponse(
             identifiers=[
                 TableIdentifier(
-                    namespace=[namespace, ds.namespace or DEFAULT_SCHEMA], name=ds.name
+                    namespace=decode_namespace(ds.namespace or DEFAULT_SCHEMA),
+                    name=ds.name,
                 )
                 for ds in datasets
             ]
         )
 
-    @router.post("/namespaces/{namespace}/namespaces/{schema}/tables", status_code=200)
+    @router.post("/{prefix}/namespaces/{namespace}/tables", status_code=200)
     def create_table(
-        namespace: str, schema: str, request: CreateTableRequest
+        prefix: str, namespace: str, request: CreateTableRequest
     ) -> LoadTableResponse:
-        project = resolve_namespace(namespace, schema)
-        _ensure_namespace_exists(project)
+        _ensure_project_exists(prefix)
+        ns_parts = decode_namespace(namespace)
+        ns_name = ns_parts[0] if ns_parts else namespace
 
         try:
             existing = store.registry.get_saved_dataset(
-                request.name, project=project, allow_cache=False, namespace=schema
+                request.name, project=prefix, allow_cache=False, namespace=ns_name
             )
             if _is_table(existing):
-                raise TableAlreadyExistsException(
-                    f"{namespace}.{schema}", request.name
-                )
+                raise TableAlreadyExistsException(namespace, request.name)
         except FeastObjectNotFoundException:
             pass
 
@@ -96,7 +99,7 @@ def get_table_router(
 
         location = (
             request.location
-            or f"feast://{namespace}/{schema}/tables/{request.name}"
+            or f"feast://{prefix}/{ns_name}/tables/{request.name}"
         )
         properties = dict(request.properties) if request.properties else {}
         properties[CATALOG_MANAGED_TAG] = "true"
@@ -106,24 +109,25 @@ def get_table_router(
         ds = SavedDataset(
             name=request.name,
             tags=properties,
-            namespace=schema,
+            namespace=ns_name,
             columns=columns,
         )
-        store.registry.apply_saved_dataset(ds, project=project, commit=True)
-        return saved_dataset_to_load_table_response(ds, namespace)
+        store.registry.apply_saved_dataset(ds, project=prefix, commit=True)
+        return saved_dataset_to_load_table_response(ds, prefix)
 
-    @router.get("/namespaces/{namespace}/namespaces/{schema}/tables/{table}")
-    def load_table(namespace: str, schema: str, table: str):
-        project = resolve_namespace(namespace, schema)
-        _ensure_namespace_exists(project)
+    @router.get("/{prefix}/namespaces/{namespace}/tables/{table}")
+    def load_table(prefix: str, namespace: str, table: str):
+        _ensure_project_exists(prefix)
+        ns_parts = decode_namespace(namespace)
+        ns_name = ns_parts[0] if ns_parts else namespace
         try:
             ds = store.registry.get_saved_dataset(
-                table, project=project, allow_cache=True, namespace=schema
+                table, project=prefix, allow_cache=True, namespace=ns_name
             )
         except FeastObjectNotFoundException:
-            raise TableNotFoundException(f"{namespace}.{schema}", table)
+            raise TableNotFoundException(namespace, table)
         if not _is_table(ds):
-            raise TableNotFoundException(f"{namespace}.{schema}", table)
+            raise TableNotFoundException(namespace, table)
         location = ds.tags.get("location", "")
 
         if metadata_reader and location.startswith("s3://"):
@@ -148,7 +152,7 @@ def get_table_router(
                 table, location,
             )
 
-        result = saved_dataset_to_load_table_response(ds, namespace)
+        result = saved_dataset_to_load_table_response(ds, prefix)
         if credential_vender and location.startswith("s3://"):
             try:
                 vended = credential_vender.vend(location)
@@ -157,111 +161,110 @@ def get_table_router(
                 logger.warning("STS vending failed for %s: %s", table, e)
         return result
 
-    @router.head("/namespaces/{namespace}/namespaces/{schema}/tables/{table}")
-    def table_exists(namespace: str, schema: str, table: str) -> Response:
-        project = resolve_namespace(namespace, schema)
-        _ensure_namespace_exists(project)
+    @router.head("/{prefix}/namespaces/{namespace}/tables/{table}")
+    def table_exists(prefix: str, namespace: str, table: str) -> Response:
+        _ensure_project_exists(prefix)
+        ns_parts = decode_namespace(namespace)
+        ns_name = ns_parts[0] if ns_parts else namespace
         try:
             ds = store.registry.get_saved_dataset(
-                table, project=project, allow_cache=True, namespace=schema
+                table, project=prefix, allow_cache=True, namespace=ns_name
             )
         except FeastObjectNotFoundException:
-            raise TableNotFoundException(f"{namespace}.{schema}", table)
+            raise TableNotFoundException(namespace, table)
         if not _is_table(ds):
-            raise TableNotFoundException(f"{namespace}.{schema}", table)
+            raise TableNotFoundException(namespace, table)
         return Response(status_code=204)
 
     @router.delete(
-        "/namespaces/{namespace}/namespaces/{schema}/tables/{table}", status_code=204
+        "/{prefix}/namespaces/{namespace}/tables/{table}", status_code=204
     )
-    def drop_table(namespace: str, schema: str, table: str) -> Response:
-        project = resolve_namespace(namespace, schema)
-        _ensure_namespace_exists(project)
+    def drop_table(prefix: str, namespace: str, table: str) -> Response:
+        _ensure_project_exists(prefix)
+        ns_parts = decode_namespace(namespace)
+        ns_name = ns_parts[0] if ns_parts else namespace
         try:
             ds = store.registry.get_saved_dataset(
-                table, project=project, allow_cache=False, namespace=schema
+                table, project=prefix, allow_cache=False, namespace=ns_name
             )
         except FeastObjectNotFoundException:
-            raise TableNotFoundException(f"{namespace}.{schema}", table)
+            raise TableNotFoundException(namespace, table)
         if not _is_table(ds):
-            raise TableNotFoundException(f"{namespace}.{schema}", table)
+            raise TableNotFoundException(namespace, table)
         store.registry.delete_saved_dataset(
-            table, project=project, commit=True, namespace=schema
+            table, project=prefix, commit=True, namespace=ns_name
         )
         return Response(status_code=204)
 
-    @router.put("/namespaces/{namespace}/namespaces/{schema}/tables/{table}")
+    @router.post("/{prefix}/namespaces/{namespace}/tables/{table}")
     def update_table(
-        namespace: str, schema: str, table: str, request: UpdateTableRequest
+        prefix: str, namespace: str, table: str, request: UpdateTableRequest
     ) -> LoadTableResponse:
-        project = resolve_namespace(namespace, schema)
-        _ensure_namespace_exists(project)
+        _ensure_project_exists(prefix)
+        ns_parts = decode_namespace(namespace)
+        ns_name = ns_parts[0] if ns_parts else namespace
         try:
             ds = store.registry.get_saved_dataset(
-                table, project=project, allow_cache=False, namespace=schema
+                table, project=prefix, allow_cache=False, namespace=ns_name
             )
         except FeastObjectNotFoundException:
-            raise TableNotFoundException(f"{namespace}.{schema}", table)
+            raise TableNotFoundException(namespace, table)
         if not _is_table(ds):
-            raise TableNotFoundException(f"{namespace}.{schema}", table)
+            raise TableNotFoundException(namespace, table)
 
         tags = dict(ds.tags)
-        if request.properties:
-            tags.update(request.properties)
-        if request.data_source_format is not None:
-            tags["format"] = request.data_source_format
-        if request.location is not None:
-            tags["location"] = request.location
+        for update in request.updates:
+            if update.action not in SUPPORTED_UPDATE_ACTIONS:
+                return JSONResponse(
+                    status_code=501,
+                    content={
+                        "error": {
+                            "message": f"Update action '{update.action}' is not supported in Phase 1. "
+                            f"Supported actions: {', '.join(sorted(SUPPORTED_UPDATE_ACTIONS))}",
+                            "type": "UnsupportedOperationException",
+                            "code": 501,
+                        }
+                    },
+                )
 
-        columns = ds.columns
-        if request.schema_ and request.schema_.fields:
-            columns = [
-                {"name": f.name, "type": f.type, "nullable": not f.required}
-                for f in request.schema_.fields
-            ]
-
-        data_source_ref = ds.data_source_ref
-        if request.data_source_ref is not None:
-            data_source_ref = request.data_source_ref
+            if update.action == "set-properties" and update.updates:
+                tags.update(update.updates)
+            elif update.action == "remove-properties" and update.removals:
+                for key in update.removals:
+                    tags.pop(key, None)
 
         updated = SavedDataset(
             name=table,
             tags=tags,
-            namespace=schema,
-            columns=columns,
-            data_source_ref=data_source_ref,
+            namespace=ns_name,
+            columns=ds.columns,
+            data_source_ref=ds.data_source_ref,
         )
         updated.created_timestamp = ds.created_timestamp
-        store.registry.apply_saved_dataset(updated, project=project, commit=True)
-        return saved_dataset_to_load_table_response(updated, namespace)
+        store.registry.apply_saved_dataset(updated, project=prefix, commit=True)
+        return saved_dataset_to_load_table_response(updated, prefix)
 
-    @router.post("/tables/rename", status_code=200)
-    def rename_table(request: RenameTableRequest) -> None:
-        src_ns = request.source.namespace[0] if request.source.namespace else ""
-        src_schema = (
-            request.source.namespace[1]
-            if len(request.source.namespace) > 1
+    @router.post("/{prefix}/tables/rename", status_code=200)
+    def rename_table(prefix: str, request: RenameTableRequest) -> None:
+        src_ns = (
+            request.source.namespace[0]
+            if request.source.namespace
             else DEFAULT_SCHEMA
         )
         dst_ns = (
-            request.destination.namespace[0] if request.destination.namespace else ""
-        )
-        dst_schema = (
-            request.destination.namespace[1]
-            if len(request.destination.namespace) > 1
+            request.destination.namespace[0]
+            if request.destination.namespace
             else DEFAULT_SCHEMA
         )
 
-        _ensure_namespace_exists(src_ns)
-        if dst_ns != src_ns:
-            _ensure_namespace_exists(dst_ns)
+        _ensure_project_exists(prefix)
 
         try:
             src_ds = store.registry.get_saved_dataset(
                 request.source.name,
-                project=src_ns,
+                project=prefix,
                 allow_cache=False,
-                namespace=src_schema,
+                namespace=src_ns,
             )
         except FeastObjectNotFoundException:
             raise TableNotFoundException(src_ns, request.source.name)
@@ -271,9 +274,9 @@ def get_table_router(
         try:
             existing = store.registry.get_saved_dataset(
                 request.destination.name,
-                project=dst_ns,
+                project=prefix,
                 allow_cache=False,
-                namespace=dst_schema,
+                namespace=dst_ns,
             )
             if _is_table(existing):
                 raise TableAlreadyExistsException(dst_ns, request.destination.name)
@@ -283,13 +286,13 @@ def get_table_router(
         new_ds = SavedDataset(
             name=request.destination.name,
             tags=dict(src_ds.tags),
-            namespace=dst_schema,
+            namespace=dst_ns,
             columns=src_ds.columns,
             data_source_ref=src_ds.data_source_ref,
         )
-        store.registry.apply_saved_dataset(new_ds, project=dst_ns, commit=True)
+        store.registry.apply_saved_dataset(new_ds, project=prefix, commit=True)
         store.registry.delete_saved_dataset(
-            request.source.name, project=src_ns, commit=True, namespace=src_schema
+            request.source.name, project=prefix, commit=True, namespace=src_ns
         )
 
     return router
