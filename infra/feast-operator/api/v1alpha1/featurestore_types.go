@@ -80,8 +80,8 @@ type CatalogSSARConfig struct {
 
 // FeatureStoreSpec defines the desired state of FeatureStore
 type FeatureStoreSpec struct {
-	// +kubebuilder:validation:Pattern="^[A-Za-z0-9][A-Za-z0-9_-]*$"
-	// FeastProject is the Feast project id. This can be any alphanumeric string with underscores and hyphens, but it cannot start with an underscore or hyphen. Required.
+	// +kubebuilder:validation:Pattern="^([A-Za-z0-9][A-Za-z0-9_-]*)?$"
+	// FeastProject is the Feast project id. This can be any alphanumeric string with underscores and hyphens, but it cannot start with an underscore or hyphen. Empty string is permitted when catalog mode is enabled (multi-project registry).
 	FeastProject    string                `json:"feastProject"`
 	FeastProjectDir *FeastProjectDir      `json:"feastProjectDir,omitempty"`
 	Services        *FeatureStoreServices `json:"services,omitempty"`

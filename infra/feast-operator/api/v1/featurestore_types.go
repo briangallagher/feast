@@ -142,8 +142,8 @@ type OpenLineageConfig struct {
 // +kubebuilder:validation:XValidation:rule="self.replicas <= 1 && (!has(self.services) || !has(self.services.scaling) || !has(self.services.scaling.autoscaling)) || (!has(self.services) || !has(self.services.offlineStore) || (has(self.services.offlineStore.persistence) && has(self.services.offlineStore.persistence.store)))",message="Scaling requires DB-backed persistence for the offline store. Configure services.offlineStore.persistence.store when using replicas > 1 or autoscaling."
 // +kubebuilder:validation:XValidation:rule="self.replicas <= 1 && (!has(self.services) || !has(self.services.scaling) || !has(self.services.scaling.autoscaling)) || (has(self.services) && has(self.services.registry) && (has(self.services.registry.remote) || (has(self.services.registry.local) && has(self.services.registry.local.persistence) && (has(self.services.registry.local.persistence.store) || (has(self.services.registry.local.persistence.file) && has(self.services.registry.local.persistence.file.path) && (self.services.registry.local.persistence.file.path.startsWith('s3://') || self.services.registry.local.persistence.file.path.startsWith('gs://')))))))",message="Scaling requires DB-backed or remote registry. Configure registry.local.persistence.store or use a remote registry when using replicas > 1 or autoscaling. S3/GCS-backed registry is also allowed."
 type FeatureStoreSpec struct {
-	// +kubebuilder:validation:Pattern="^[A-Za-z0-9][A-Za-z0-9_-]*$"
-	// FeastProject is the Feast project id. This can be any alphanumeric string with underscores and hyphens, but it cannot start with an underscore or hyphen. Required.
+	// +kubebuilder:validation:Pattern="^([A-Za-z0-9][A-Za-z0-9_-]*)?$"
+	// FeastProject is the Feast project id. This can be any alphanumeric string with underscores and hyphens, but it cannot start with an underscore or hyphen. Empty string is permitted when catalog mode is enabled (multi-project registry).
 	FeastProject    string                `json:"feastProject"`
 	FeastProjectDir *FeastProjectDir      `json:"feastProjectDir,omitempty"`
 	Services        *FeatureStoreServices `json:"services,omitempty"`
