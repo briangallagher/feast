@@ -7,6 +7,7 @@ from feast.api.catalog.metadata_reader import create_reader_from_env
 from feast.api.catalog.models import CatalogConfig
 from feast.api.catalog.namespaces import get_namespace_router
 from feast.api.catalog.search import get_search_router
+from feast.api.catalog.ssar import add_ssar_middleware
 from feast.api.catalog.tables import get_table_router
 from feast.api.catalog.volumes import get_volume_router
 
@@ -35,6 +36,7 @@ CATALOG_ENDPOINTS = [
 
 def add_catalog_routes(app: FastAPI, store: FeatureStore) -> None:
     register_iceberg_exception_handlers(app)
+    add_ssar_middleware(app)
 
     credential_vender = create_vender_from_env()
     metadata_reader = create_reader_from_env()
