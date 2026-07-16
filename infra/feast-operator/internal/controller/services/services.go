@@ -105,6 +105,9 @@ func (feast *FeastServices) Deploy() error {
 	if err := feast.createOrDeleteServiceMonitor(); err != nil {
 		return err
 	}
+	if err := feast.ReconcileCatalogClusterRoles(); err != nil {
+		return err
+	}
 
 	return nil
 }
