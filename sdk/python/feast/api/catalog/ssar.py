@@ -219,7 +219,8 @@ async def _check_ssar(
     per_request_config.host = _k8s_configuration.host
     per_request_config.ssl_ca_cert = _k8s_configuration.ssl_ca_cert
     per_request_config.verify_ssl = _k8s_configuration.verify_ssl
-    per_request_config.api_key = {"authorization": f"Bearer {token}"}
+    per_request_config.api_key = {"BearerToken": token}
+    per_request_config.api_key_prefix = {"BearerToken": "Bearer"}
 
     api_client = k8s_client.ApiClient(configuration=per_request_config)
     auth_api = k8s_client.AuthorizationV1Api(api_client)
