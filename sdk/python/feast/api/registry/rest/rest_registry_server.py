@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -77,7 +78,11 @@ class RestRegistryServer:
         self._init_auth()
         self._register_routes()
 
-        add_catalog_routes(self.app, self.store)
+        if os.environ.get("DATACATALOG_ENABLED", "false").lower() == "true":
+            add_catalog_routes(self.app, self.store)
+            logger.info("Catalog API enabled (DATACATALOG_ENABLED=true)")
+        else:
+            logger.info("Catalog API disabled (set DATACATALOG_ENABLED=true to enable)")
 
         registry_cfg = getattr(store.config, "registry", None)
         mcp_cfg = getattr(registry_cfg, "mcp", None)
