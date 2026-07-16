@@ -164,6 +164,39 @@ class SSARCache:
         self._cache[key] = (allowed, time.time())
 
 
+_k8s_config_loaded = False
+_k8s_configuration = None
+
+
+def _ensure_k8s_config():
+    """Load K8s configuration once at first use."""
+    global _k8s_config_loaded, _k8s_configuration
+    if _k8s_config_loaded:
+        return
+
+    try:
+        from kubernetes import client as k8s_client
+        from kubernetes import config as k8s_config
+    except ImportError:
+        logger.error("kubernetes package not installed — SSAR checks will fail")
+        raise
+
+    _k8s_configuration = k8s_client.Configuration()
+
+    try:
+        k8s_config.load_incluster_config(client_configuration=_k8s_configuration)
+        logger.info("SSAR: loaded in-cluster K8s config")
+    except k8s_config.ConfigException:
+        try:
+            k8s_config.load_kube_config(client_configuration=_k8s_configuration)
+            logger.info("SSAR: loaded kubeconfig")
+        except k8s_config.ConfigException:
+            logger.error("Cannot configure Kubernetes client for SSAR")
+            raise
+
+    _k8s_config_loaded = True
+
+
 async def _check_ssar(
     token: str,
     resource: str,
@@ -172,30 +205,23 @@ async def _check_ssar(
 ) -> bool:
     """Issue a SelfSubjectAccessReview against the K8s API server.
 
-    Uses the caller's bearer token (impersonation via Authorization header)
-    to ask: "can this user perform {verb} on {resource} in {namespace}?"
+    Uses the caller's bearer token to ask: "can this user perform
+    {verb} on {resource} in {namespace}?"
+
+    The K8s configuration is loaded once and reused. Per-request, only
+    the Authorization header is swapped to carry the caller's token.
     """
-    try:
-        from kubernetes import client as k8s_client
-        from kubernetes import config as k8s_config
-    except ImportError:
-        logger.error("kubernetes package not installed — SSAR checks will fail")
-        raise
+    from kubernetes import client as k8s_client
 
-    api_client = k8s_client.ApiClient()
-    api_client.configuration = k8s_client.Configuration()
+    _ensure_k8s_config()
 
-    try:
-        k8s_config.load_incluster_config(client_configuration=api_client.configuration)
-    except k8s_config.ConfigException:
-        try:
-            k8s_config.load_kube_config(client_configuration=api_client.configuration)
-        except k8s_config.ConfigException:
-            logger.error("Cannot configure Kubernetes client for SSAR")
-            raise
+    per_request_config = k8s_client.Configuration()
+    per_request_config.host = _k8s_configuration.host
+    per_request_config.ssl_ca_cert = _k8s_configuration.ssl_ca_cert
+    per_request_config.verify_ssl = _k8s_configuration.verify_ssl
+    per_request_config.api_key = {"authorization": f"Bearer {token}"}
 
-    api_client.default_headers["Authorization"] = f"Bearer {token}"
-
+    api_client = k8s_client.ApiClient(configuration=per_request_config)
     auth_api = k8s_client.AuthorizationV1Api(api_client)
 
     ssar_body = k8s_client.V1SelfSubjectAccessReview(
@@ -213,8 +239,10 @@ async def _check_ssar(
         result = auth_api.create_self_subject_access_review(body=ssar_body)
         return result.status.allowed
     except k8s_client.ApiException as e:
-        logger.error("SSAR API call failed: %s", e)
+        logger.error("SSAR API call failed (status=%s): %s", e.status, e.reason)
         raise
+    finally:
+        api_client.close()
 
 
 class SSARMiddleware(BaseHTTPMiddleware):
