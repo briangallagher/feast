@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Response
 
 from feast import FeatureStore
+from feast.api.catalog.connections import resolve_credentials
 from feast.api.catalog.credentials import STSCredentialVender
 from feast.api.catalog.errors import (
     NamespaceNotFoundException,
@@ -108,7 +109,10 @@ def get_volume_router(
         if not _is_volume(ds):
             raise VolumeNotFoundException(namespace, volume)
         result = saved_dataset_to_volume_info(ds, prefix)
-        if credential_vender:
+        connection_creds = resolve_credentials(ds, prefix)
+        if connection_creds:
+            result.config.update(connection_creds)
+        elif credential_vender:
             location = ds.tags.get("location", "")
             if location.startswith("s3://"):
                 try:

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Response
 from fastapi.responses import JSONResponse
 
 from feast import FeatureStore
+from feast.api.catalog.connections import resolve_credentials
 from feast.api.catalog.credentials import STSCredentialVender
 from feast.api.catalog.errors import (
     NamespaceNotFoundException,
@@ -130,6 +131,8 @@ def get_table_router(
             raise TableNotFoundException(namespace, table)
         location = ds.tags.get("location", "")
 
+        connection_creds = resolve_credentials(ds, prefix)
+
         if metadata_reader and location.startswith("s3://"):
             catalog_properties = {
                 k: v
@@ -140,7 +143,9 @@ def get_table_router(
                 location, table_properties=catalog_properties
             )
             if real_response:
-                if credential_vender:
+                if connection_creds:
+                    real_response["config"].update(connection_creds)
+                elif credential_vender:
                     try:
                         vended = credential_vender.vend(location)
                         real_response["config"].update(vended)
@@ -153,7 +158,9 @@ def get_table_router(
             )
 
         result = saved_dataset_to_load_table_response(ds, prefix)
-        if credential_vender and location.startswith("s3://"):
+        if connection_creds:
+            result.config.update(connection_creds)
+        elif credential_vender and location.startswith("s3://"):
             try:
                 vended = credential_vender.vend(location)
                 result.config.update(vended)
