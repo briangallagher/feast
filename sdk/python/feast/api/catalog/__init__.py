@@ -1,4 +1,6 @@
-from fastapi import FastAPI
+from typing import Optional
+
+from fastapi import FastAPI, Query
 
 from feast import FeatureStore
 from feast.api.catalog.credentials import create_vender_from_env
@@ -42,6 +44,23 @@ def add_catalog_routes(app: FastAPI, store: FeatureStore) -> None:
     metadata_reader = create_reader_from_env()
 
     prefix = "/v1"
+
+    @app.get(f"{prefix}/config")
+    def catalog_config_bootstrap(
+        warehouse: Optional[str] = Query(default=None),
+    ) -> CatalogConfig:
+        """Bootstrap config endpoint per Iceberg REST spec.
+
+        PyIceberg/Spark call GET /v1/config?warehouse=X before any prefixed
+        requests. The server responds with the prefix override so subsequent
+        calls use /v1/{prefix}/...
+        """
+        pfx = warehouse or "default"
+        return CatalogConfig(
+            defaults={},
+            overrides={"prefix": pfx},
+            endpoints=CATALOG_ENDPOINTS,
+        )
 
     @app.get(f"{prefix}/{{prefix}}/config")
     def catalog_config(prefix: str) -> CatalogConfig:
