@@ -128,9 +128,9 @@ def get_namespace_router(store: FeatureStore) -> APIRouter:
             project=prefix,
             allow_cache=False,
             tags={CATALOG_MANAGED_TAG: "true"},
-            namespace=ns_name,
         )
-        if catalog_datasets:
+        ns_datasets = [ds for ds in catalog_datasets if (ds.namespace or DEFAULT_SCHEMA) == ns_name]
+        if ns_datasets:
             raise NamespaceNotEmptyException(namespace)
 
         return Response(status_code=204)

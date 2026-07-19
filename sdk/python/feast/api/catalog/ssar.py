@@ -308,6 +308,18 @@ class SSARMiddleware(BaseHTTPMiddleware):
             allowed = await _check_ssar(token, resource, verb, prefix)
         except Exception as e:
             logger.error("SSAR check failed: %s", e)
+            from kubernetes import client as k8s_client
+            if isinstance(e, k8s_client.ApiException) and e.status == 401:
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "error": {
+                            "message": "Invalid or expired bearer token.",
+                            "type": "NotAuthorizedException",
+                            "code": 401,
+                        }
+                    },
+                )
             return JSONResponse(
                 status_code=503,
                 content={
