@@ -123,7 +123,6 @@ func (feast *FeastServices) CatalogEnvVars() []corev1.EnvVar {
 	cr := feast.Handler.FeatureStore
 	vars := []corev1.EnvVar{
 		{Name: "DATACATALOG_ENABLED", Value: "true"},
-		{Name: "DATACATALOG_SSAR_ENABLED", Value: "true"},
 	}
 	if cr.Spec.Catalog.SSAR != nil {
 		if cr.Spec.Catalog.SSAR.APIGroup != "" {
@@ -532,7 +531,11 @@ func (feast *FeastServices) setPod(podSpec *corev1.PodSpec) error {
 func (feast *FeastServices) setContainers(podSpec *corev1.PodSpec) error {
 	fsYamlB64, err := feast.GetServiceFeatureStoreYamlBase64()
 	if err != nil {
-		return err
+		if feast.IsCatalogMode() {
+			fsYamlB64 = ""
+		} else {
+			return err
+		}
 	}
 
 	feast.setInitContainer(podSpec, fsYamlB64)
@@ -774,6 +777,9 @@ func (feast *FeastServices) getDeploymentStrategy() appsv1.DeploymentStrategy {
 }
 
 func (feast *FeastServices) setInitContainer(podSpec *corev1.PodSpec, fsYamlB64 string) {
+	if feast.IsCatalogMode() {
+		return
+	}
 	applied := feast.Handler.FeatureStore.Status.Applied
 	if applied.FeastProjectDir != nil && !applied.Services.DisableInitContainers {
 		feastProjectDir := applied.FeastProjectDir
@@ -1350,21 +1356,33 @@ func (feast *FeastServices) isRemoteHostnameRegistry() bool {
 }
 
 func (feast *FeastServices) isOfflineServer() bool {
+	if feast.IsCatalogMode() {
+		return false
+	}
 	return feast.isOfflineStore() &&
 		feast.Handler.FeatureStore.Status.Applied.Services.OfflineStore.Server != nil
 }
 
 func (feast *FeastServices) isOfflineStore() bool {
+	if feast.IsCatalogMode() {
+		return false
+	}
 	appliedServices := feast.Handler.FeatureStore.Status.Applied.Services
 	return appliedServices != nil && appliedServices.OfflineStore != nil
 }
 
 func (feast *FeastServices) isOnlineServer() bool {
+	if feast.IsCatalogMode() {
+		return false
+	}
 	return feast.isOnlineStore() &&
 		feast.Handler.FeatureStore.Status.Applied.Services.OnlineStore.Server != nil
 }
 
 func (feast *FeastServices) isOnlineStore() bool {
+	if feast.IsCatalogMode() {
+		return false
+	}
 	appliedServices := feast.Handler.FeatureStore.Status.Applied.Services
 	return appliedServices != nil && appliedServices.OnlineStore != nil
 }
@@ -1494,6 +1512,9 @@ func (feast *FeastServices) mountEmptyDirVolumes(podSpec *corev1.PodSpec) {
 }
 
 func (feast *FeastServices) getFeatureRepoDir() string {
+	if feast.IsCatalogMode() {
+		return "/catalog-config"
+	}
 	applied := feast.Handler.FeatureStore.Status.Applied
 	feastProjectDir := getOfflineMountPath(feast.Handler.FeatureStore) + "/" + applied.FeastProject
 	if applied.FeastProjectDir != nil && applied.FeastProjectDir.Git != nil && len(applied.FeastProjectDir.Git.FeatureRepoPath) > 0 {
