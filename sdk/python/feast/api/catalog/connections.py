@@ -42,15 +42,11 @@ def _get_k8s_client():
 def resolve_connection(
     connection_name: str, namespace: str
 ) -> Optional[Dict[str, str]]:
-    """Read a Data Connection K8s Secret and return Iceberg config keys.
+    """Read a Data Connection K8s Secret and return Iceberg config keys."""
+    import os
+    override_namespace = os.environ.get("CATALOG_CONNECTIONS_NAMESPACE")
+    target_namespace = override_namespace if override_namespace else namespace
 
-    Only reads Secrets labeled opendatahub.io/managed=true (defense in depth).
-
-    Returns None if:
-      - Secret doesn't exist (logged as warning, graceful fallback)
-      - Secret lacks the managed label (refused)
-      - K8s API is unavailable (logged, graceful fallback)
-    """
     try:
         from kubernetes import client as k8s_client
     except ImportError:
@@ -59,17 +55,17 @@ def resolve_connection(
 
     try:
         v1 = _get_k8s_client()
-        secret = v1.read_namespaced_secret(connection_name, namespace)
+        secret = v1.read_namespaced_secret(connection_name, target_namespace)
     except k8s_client.ApiException as e:
         if e.status == 404:
             logger.warning(
                 "Data Connection Secret '%s' not found in namespace '%s'",
-                connection_name, namespace,
+                connection_name, target_namespace,
             )
             return None
         logger.error(
             "Failed to read Secret '%s' in namespace '%s': %s",
-            connection_name, namespace, e,
+            connection_name, target_namespace, e,
         )
         return None
     except Exception as e:

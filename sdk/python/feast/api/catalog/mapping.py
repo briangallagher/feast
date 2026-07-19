@@ -115,6 +115,7 @@ def saved_dataset_to_load_table_response(
         schemas=[schema],
         current_schema_id=0,
         last_column_id=len(schema.fields),
+        last_sequence_number=0,
     )
 
     return LoadTableResponse(  # type: ignore[call-arg]
