@@ -22,7 +22,7 @@ def _make_mock_secret(
     secret = MagicMock()
     secret.metadata.name = name
     secret.metadata.namespace = namespace
-    secret.metadata.labels = labels or {MANAGED_LABEL: "true"}
+    secret.metadata.labels = labels if labels is not None else {MANAGED_LABEL: "true"}
     secret.data = {
         k: base64.b64encode(v.encode("utf-8")).decode("utf-8")
         for k, v in data.items()

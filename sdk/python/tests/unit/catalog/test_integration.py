@@ -21,6 +21,7 @@ os.environ["DATACATALOG_SSAR_ENABLED"] = "false"
 
 from feast.api.catalog import add_catalog_routes
 from feast.api.catalog.mapping import CATALOG_MANAGED_TAG
+from feast.errors import FeastObjectNotFoundException
 
 
 class MockSavedDataset:
@@ -55,10 +56,6 @@ class MockProject:
         self.owner = owner
         self.created_timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
         self.last_updated_timestamp = datetime(2024, 6, 1, tzinfo=timezone.utc)
-
-
-class FeastObjectNotFoundException(Exception):
-    pass
 
 
 class MockRegistry:
@@ -174,10 +171,7 @@ def mock_store(mock_registry):
 def client(mock_store):
     app = FastAPI()
     with patch("feast.api.catalog.credentials.create_vender_from_env", return_value=None), \
-         patch("feast.api.catalog.metadata_reader.create_reader_from_env", return_value=None), \
-         patch("feast.errors.FeastObjectNotFoundException", FeastObjectNotFoundException):
-        import feast.errors
-        feast.errors.FeastObjectNotFoundException = FeastObjectNotFoundException
+         patch("feast.api.catalog.metadata_reader.create_reader_from_env", return_value=None):
         add_catalog_routes(app, mock_store)
     return TestClient(app)
 
@@ -217,10 +211,7 @@ def seeded_client(mock_store, mock_registry):
 
     app = FastAPI()
     with patch("feast.api.catalog.credentials.create_vender_from_env", return_value=None), \
-         patch("feast.api.catalog.metadata_reader.create_reader_from_env", return_value=None), \
-         patch("feast.errors.FeastObjectNotFoundException", FeastObjectNotFoundException):
-        import feast.errors
-        feast.errors.FeastObjectNotFoundException = FeastObjectNotFoundException
+         patch("feast.api.catalog.metadata_reader.create_reader_from_env", return_value=None):
         add_catalog_routes(app, mock_store)
     return TestClient(app)
 
