@@ -85,6 +85,7 @@ class TableMetadata(BaseModel):
     default_sort_order_id: int = Field(default=0, alias="default-sort-order-id")
     last_column_id: int = Field(default=0, alias="last-column-id")
     last_sequence_number: int = Field(default=0, alias="last-sequence-number")
+    last_partition_id: int = Field(default=999, alias="last-partition-id")
     snapshots: List[Any] = []
     current_snapshot_id: int = Field(default=-1, alias="current-snapshot-id")
 
