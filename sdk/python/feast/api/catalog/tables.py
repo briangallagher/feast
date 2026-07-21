@@ -62,15 +62,15 @@ def get_table_router(
             project=prefix,
             allow_cache=False,
             tags={CATALOG_MANAGED_TAG: "true", "asset_type": TABLE_ASSET_TYPE},
-            namespace=ns_name,
         )
+        filtered = [ds for ds in datasets if (ds.namespace or DEFAULT_SCHEMA) == ns_name]
         return ListTablesResponse(
             identifiers=[
                 TableIdentifier(
                     namespace=decode_namespace(ds.namespace or DEFAULT_SCHEMA),
                     name=ds.name,
                 )
-                for ds in datasets
+                for ds in filtered
             ]
         )
 

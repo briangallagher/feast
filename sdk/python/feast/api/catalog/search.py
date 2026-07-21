@@ -91,6 +91,10 @@ def get_search_router(store: FeatureStore) -> APIRouter:
             default="",
             description="Text search query (matches name, description, and property values). Empty string returns all assets.",
         ),
+        namespace: Optional[str] = Query(
+            default=None,
+            description="Restrict search to a single namespace name.",
+        ),
         namespaces: Optional[List[str]] = Query(
             default=None,
             description="Restrict search to these namespace names (searches all if omitted).",
@@ -99,17 +103,28 @@ def get_search_router(store: FeatureStore) -> APIRouter:
             default=None,
             description="Property filters as 'key:value' pairs. All must match. Example: properties=domain:flood&properties=format:iceberg",
         ),
+        type_filter: Optional[str] = Query(
+            default=None,
+            alias="type",
+            description="Filter by asset type: table, volume, iceberg_table, document_collection, vector_index, dataset.",
+        ),
         asset_type: Optional[str] = Query(
             default=None,
-            description="Filter by asset type: table, volume, iceberg_table, document_collection, vector_index, dataset.",
+            description="Filter by asset type (alternative to 'type' parameter).",
         ),
         sort_by: str = Query(
             default="score",
             description="Sort results by 'score' (relevance, descending) or 'name' (alphabetical).",
         ),
         page: int = Query(default=1, ge=1, description="Page number (1-indexed)."),
+        page_size: Optional[int] = Query(
+            default=None,
+            ge=1,
+            le=500,
+            description="Results per page.",
+        ),
         limit: int = Query(
-            default=50, ge=1, le=500, description="Results per page."
+            default=50, ge=1, le=500, description="Results per page (default when page_size not specified)."
         ),
     ) -> SearchResponse:
         """Search catalog assets with property filtering, relevance scoring, and pagination.
@@ -120,21 +135,30 @@ def get_search_router(store: FeatureStore) -> APIRouter:
 
         Features beyond the basic substring search:
         - **Property filtering**: `?properties=domain:flood` filters by tag values
-        - **Asset type filtering**: `?asset_type=volume` shows only volumes
+        - **Type filtering**: `?type=volume` or `?asset_type=volume` shows only volumes
+        - **Namespace scoping**: `?namespace=underwriting` or `?namespaces=underwriting`
         - **Relevance scoring**: results ranked by match quality (exact > substring > property > fuzzy)
-        - **Pagination**: `?page=1&limit=10` for large catalogs
+        - **Pagination**: `?page=1&page_size=10` (or `?limit=10`) for large catalogs
         - **Empty query**: `?query=` returns all assets (useful with property filters)
         """
+        effective_namespaces = list(namespaces or [])
+        if namespace and namespace not in effective_namespaces:
+            effective_namespaces.append(namespace)
+
+        effective_type = type_filter or asset_type
+
+        effective_limit = page_size if page_size is not None else limit
+
         try:
-            store.registry.get_project(prefix, allow_cache=True)
+            store.registry.get_project(prefix, allow_cache=False)
         except Exception:
             return SearchResponse(
-                query=query, results=[], total=0, page=page, limit=limit
+                query=query, results=[], total=0, page=page, limit=effective_limit
             )
 
         datasets = store.registry.list_saved_datasets(
             project=prefix,
-            allow_cache=True,
+            allow_cache=False,
             tags={CATALOG_MANAGED_TAG: "true"},
         )
 
@@ -145,10 +169,10 @@ def get_search_router(store: FeatureStore) -> APIRouter:
             description = ds.tags.get("comment") or ds.tags.get("description")
             ds_ns = ds.namespace or DEFAULT_SCHEMA
 
-            if namespaces and ds_ns not in namespaces:
+            if effective_namespaces and ds_ns not in effective_namespaces:
                 continue
 
-            if asset_type and ds_asset_type != asset_type:
+            if effective_type and ds_asset_type != effective_type:
                 continue
 
             if properties and not _matches_property_filters(ds.tags, properties):
@@ -188,15 +212,15 @@ def get_search_router(store: FeatureStore) -> APIRouter:
             scored_results.sort(key=lambda x: x[0], reverse=True)
 
         total = len(scored_results)
-        start = (page - 1) * limit
-        page_results = [r for _, r in scored_results[start : start + limit]]
+        start = (page - 1) * effective_limit
+        page_results = [r for _, r in scored_results[start : start + effective_limit]]
 
         return SearchResponse(
             query=query,
             results=page_results,
             total=total,
             page=page,
-            limit=limit,
+            limit=effective_limit,
         )
 
     return router

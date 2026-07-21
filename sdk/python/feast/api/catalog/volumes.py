@@ -55,10 +55,10 @@ def get_volume_router(
             project=prefix,
             allow_cache=False,
             tags={CATALOG_MANAGED_TAG: "true", "asset_type": VOLUME_ASSET_TYPE},
-            namespace=ns_name,
         )
+        filtered = [ds for ds in datasets if (ds.namespace or DEFAULT_SCHEMA) == ns_name]
         return ListVolumesResponse(
-            volumes=[saved_dataset_to_volume_info(ds, prefix) for ds in datasets]
+            volumes=[saved_dataset_to_volume_info(ds, prefix) for ds in filtered]
         )
 
     @router.post("/{prefix}/namespaces/{namespace}/volumes", status_code=200)
