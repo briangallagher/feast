@@ -96,8 +96,10 @@ class TestFuzzyMatch:
         assert _compute_match_score("flod", "flood", "", {}) == 40
 
     def test_short_query_no_fuzzy(self):
-        # len < 3 should skip fuzzy matching entirely
-        assert _compute_match_score("fl", "flood", "", {}) == 0
+        # "ab" vs "ba" has 100% overlap, which would be ≥ 75% threshold,
+        # but len("ab") < 3 so fuzzy is never attempted; "ab" is not a
+        # substring of "ba" either, so result is 0
+        assert _compute_match_score("ab", "ba", "", {}) == 0
 
     def test_fuzzy_below_threshold(self):
         # "xyz" vs "flood" — {x,y,z} & {f,l,o,d} = {} → 0%
@@ -115,8 +117,11 @@ class TestNoMatch:
         assert _compute_match_score("quantum", "flood_events", "sensor data", tags) == 0
 
     def test_empty_query_is_substring_of_everything(self):
-        # empty string is a substring of any string, so "" in name.lower() == True → 90
-        assert _compute_match_score("", "flood_events", "", {}) == 100
+        # empty string is a substring of any string → substring match (90)
+        assert _compute_match_score("", "flood_events", "", {}) == 90
+
+    def test_empty_query_matches_empty_name_exact(self):
+        assert _compute_match_score("", "", "", {}) == 100
 
 
 # ---------------------------------------------------------------------------

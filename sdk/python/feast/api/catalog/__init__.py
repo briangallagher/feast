@@ -8,7 +8,7 @@ from feast.api.catalog.errors import register_iceberg_exception_handlers
 from feast.api.catalog.metadata_reader import create_reader_from_env
 from feast.api.catalog.models import CatalogConfig
 from feast.api.catalog.namespaces import get_namespace_router
-from feast.api.catalog.search import get_search_router
+from feast.api.catalog.search import get_cross_project_search_router, get_search_router
 from feast.api.catalog.ssar import add_ssar_middleware
 from feast.api.catalog.tables import get_table_router
 from feast.api.catalog.volumes import get_volume_router
@@ -28,6 +28,7 @@ CATALOG_ENDPOINTS = [
     "POST /v1/{prefix}/namespaces/{namespace}/tables/{table}",
     "DELETE /v1/{prefix}/namespaces/{namespace}/tables/{table}",
     # Extensions
+    "GET /v1/search",
     "GET /v1/{prefix}/search",
     "GET /v1/{prefix}/namespaces/{namespace}/volumes",
     "POST /v1/{prefix}/namespaces/{namespace}/volumes",
@@ -84,3 +85,4 @@ def add_catalog_routes(app: FastAPI, store: FeatureStore) -> None:
         prefix=prefix,
     )
     app.include_router(get_search_router(store), prefix=prefix)
+    app.include_router(get_cross_project_search_router(store), prefix=prefix)

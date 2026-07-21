@@ -1,11 +1,19 @@
 """
-Enhanced catalog search with property filtering, relevance scoring, and pagination.
+Multi-level catalog search with cross-project support, collection discovery,
+property filtering, relevance scoring, and pagination.
+
+Three search levels:
+  GET /v1/search              — Level 1: cross-project (all accessible namespaces)
+  GET /v1/{prefix}/search     — Level 2: single project (all collections within)
+  GET /v1/{prefix}/search?namespace=X — Level 3: single collection (tables+volumes only)
 
 Extension of the Iceberg REST Catalog API (which has no search endpoint).
 Searches catalog-managed SavedDatasets stored in the Feast registry.
-No database changes required — reads existing SavedDataset tags.
+No database changes required — reads existing SavedDataset tags and project metadata.
 """
 
+import json
+import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Query
@@ -14,6 +22,8 @@ from feast import FeatureStore
 from feast.api.catalog.mapping import CATALOG_MANAGED_TAG
 from feast.api.catalog.models import SearchResponse, SearchResult
 from feast.api.catalog.namespaces import DEFAULT_SCHEMA
+
+logger = logging.getLogger(__name__)
 
 
 def _compute_match_score(query: str, name: str, description: str, tags: dict) -> int:
@@ -81,88 +91,97 @@ def _matches_property_filters(tags: dict, filters: List[str]) -> bool:
     return True
 
 
-def get_search_router(store: FeatureStore) -> APIRouter:
-    router = APIRouter(tags=["iceberg-catalog-search"])
-
-    @router.get("/{prefix}/search")
-    def search_catalog(
-        prefix: str,
-        query: str = Query(
-            default="",
-            description="Text search query (matches name, description, and property values). Empty string returns all assets.",
-        ),
-        namespace: Optional[str] = Query(
-            default=None,
-            description="Restrict search to a single namespace name.",
-        ),
-        namespaces: Optional[List[str]] = Query(
-            default=None,
-            description="Restrict search to these namespace names (searches all if omitted).",
-        ),
-        properties: Optional[List[str]] = Query(
-            default=None,
-            description="Property filters as 'key:value' pairs. All must match. Example: properties=domain:flood&properties=format:iceberg",
-        ),
-        type_filter: Optional[str] = Query(
-            default=None,
-            alias="type",
-            description="Filter by asset type: table, volume, iceberg_table, document_collection, vector_index, dataset.",
-        ),
-        asset_type: Optional[str] = Query(
-            default=None,
-            description="Filter by asset type (alternative to 'type' parameter).",
-        ),
-        sort_by: str = Query(
-            default="score",
-            description="Sort results by 'score' (relevance, descending) or 'name' (alphabetical).",
-        ),
-        page: int = Query(default=1, ge=1, description="Page number (1-indexed)."),
-        page_size: Optional[int] = Query(
-            default=None,
-            ge=1,
-            le=500,
-            description="Results per page.",
-        ),
-        limit: int = Query(
-            default=50, ge=1, le=500, description="Results per page (default when page_size not specified)."
-        ),
-    ) -> SearchResponse:
-        """Search catalog assets with property filtering, relevance scoring, and pagination.
-
-        This is an RHOAI extension to the Iceberg REST Catalog API (the spec has no
-        search endpoint). Searches catalog-managed SavedDatasets in the Feast registry
-        using existing tags — no database changes required.
-
-        Features beyond the basic substring search:
-        - **Property filtering**: `?properties=domain:flood` filters by tag values
-        - **Type filtering**: `?type=volume` or `?asset_type=volume` shows only volumes
-        - **Namespace scoping**: `?namespace=underwriting` or `?namespaces=underwriting`
-        - **Relevance scoring**: results ranked by match quality (exact > substring > property > fuzzy)
-        - **Pagination**: `?page=1&page_size=10` (or `?limit=10`) for large catalogs
-        - **Empty query**: `?query=` returns all assets (useful with property filters)
-        """
-        effective_namespaces = list(namespaces or [])
-        if namespace and namespace not in effective_namespaces:
-            effective_namespaces.append(namespace)
-
-        effective_type = type_filter or asset_type
-
-        effective_limit = page_size if page_size is not None else limit
-
+def _get_collection_metadata(project_tags: dict, collection_name: str) -> dict:
+    """Extract metadata for a collection from project-level _ns_meta_ tags."""
+    meta_key = f"_ns_meta_{collection_name}"
+    raw = project_tags.get(meta_key)
+    if raw:
         try:
-            store.registry.get_project(prefix, allow_cache=False)
-        except Exception:
-            return SearchResponse(
-                query=query, results=[], total=0, page=page, limit=effective_limit
-            )
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {}
 
+
+def _search_project(
+    store: FeatureStore,
+    prefix: str,
+    query: str,
+    effective_namespaces: List[str],
+    effective_type: Optional[str],
+    properties: Optional[List[str]],
+    include_collections: bool,
+) -> List[tuple]:
+    """Search within a single project, returning scored (score, SearchResult) tuples."""
+    scored_results: list[tuple[int, SearchResult]] = []
+
+    try:
+        project = store.registry.get_project(prefix, allow_cache=False)
+    except Exception:
+        return scored_results
+
+    project_tags = dict(project.tags) if project.tags else {}
+
+    # Search collections (namespaces) as entities — Level 1 and 2 only
+    if include_collections and (effective_type is None or effective_type == "collection"):
         datasets = store.registry.list_saved_datasets(
             project=prefix,
             allow_cache=False,
             tags={CATALOG_MANAGED_TAG: "true"},
         )
+        collections: set[str] = set()
+        for ds in datasets:
+            collections.add(ds.namespace or DEFAULT_SCHEMA)
 
-        scored_results: list[tuple[int, SearchResult]] = []
+        # Also include collections from _ns_meta_ tags (may exist without assets)
+        for tag_key in project_tags:
+            if tag_key.startswith("_ns_meta_"):
+                ns_name = tag_key[len("_ns_meta_"):]
+                if ns_name:
+                    collections.add(ns_name)
+
+        for coll_name in collections:
+            if effective_namespaces and coll_name not in effective_namespaces:
+                continue
+
+            coll_meta = _get_collection_metadata(project_tags, coll_name)
+            coll_description = coll_meta.get("description", "")
+
+            if properties and not _matches_property_filters(coll_meta, properties):
+                continue
+
+            if query:
+                score = _compute_match_score(query, coll_name, coll_description, coll_meta)
+                if score == 0:
+                    continue
+            else:
+                score = 50
+
+            scored_results.append(
+                (
+                    score,
+                    SearchResult(
+                        type="collection",
+                        namespace=[coll_name],
+                        name=coll_name,
+                        description=coll_description or None,
+                        properties={k: v for k, v in coll_meta.items() if not k.startswith("_")},
+                        score=score,
+                        project=prefix,
+                    ),
+                )
+            )
+    else:
+        datasets = None
+
+    # Search tables and volumes
+    if effective_type is None or effective_type in ("table", "volume", "iceberg_table", "document_collection", "vector_index", "dataset"):
+        if datasets is None:
+            datasets = store.registry.list_saved_datasets(
+                project=prefix,
+                allow_cache=False,
+                tags={CATALOG_MANAGED_TAG: "true"},
+            )
 
         for ds in datasets:
             ds_asset_type = ds.tags.get("asset_type", "table")
@@ -202,9 +221,78 @@ def get_search_router(store: FeatureStore) -> APIRouter:
                         description=description,
                         properties=props,
                         score=score,
+                        project=prefix,
                     ),
                 )
             )
+
+    return scored_results
+
+
+def get_search_router(store: FeatureStore) -> APIRouter:
+    router = APIRouter(tags=["iceberg-catalog-search"])
+
+    @router.get("/{prefix}/search")
+    def search_catalog(
+        prefix: str,
+        query: str = Query(
+            default="",
+            description="Text search query (matches name, description, and property values). Empty string returns all assets.",
+        ),
+        namespace: Optional[str] = Query(
+            default=None,
+            description="Restrict search to a single namespace name.",
+        ),
+        namespaces: Optional[List[str]] = Query(
+            default=None,
+            description="Restrict search to these namespace names (searches all if omitted).",
+        ),
+        properties: Optional[List[str]] = Query(
+            default=None,
+            description="Property filters as 'key:value' pairs. All must match. Example: properties=domain:flood&properties=format:iceberg",
+        ),
+        type_filter: Optional[str] = Query(
+            default=None,
+            alias="type",
+            description="Filter by asset type: table, volume, collection, iceberg_table, document_collection, vector_index, dataset.",
+        ),
+        asset_type: Optional[str] = Query(
+            default=None,
+            description="Filter by asset type (alternative to 'type' parameter).",
+        ),
+        sort_by: str = Query(
+            default="score",
+            description="Sort results by 'score' (relevance, descending) or 'name' (alphabetical).",
+        ),
+        page: int = Query(default=1, ge=1, description="Page number (1-indexed)."),
+        page_size: Optional[int] = Query(
+            default=None,
+            ge=1,
+            le=500,
+            description="Results per page.",
+        ),
+        limit: int = Query(
+            default=50, ge=1, le=500, description="Results per page (default when page_size not specified)."
+        ),
+    ) -> SearchResponse:
+        """Search catalog assets within a single project (Level 2/3).
+
+        Level 2: search all collections, tables, and volumes within the project.
+        Level 3: add ?namespace=X to restrict to a single collection (tables+volumes only).
+        """
+        effective_namespaces = list(namespaces or [])
+        if namespace and namespace not in effective_namespaces:
+            effective_namespaces.append(namespace)
+
+        effective_type = type_filter or asset_type
+        effective_limit = page_size if page_size is not None else limit
+
+        # Level 3: if namespace filter is set, don't include collections in results
+        include_collections = len(effective_namespaces) == 0
+
+        scored_results = _search_project(
+            store, prefix, query, effective_namespaces, effective_type, properties, include_collections
+        )
 
         if sort_by == "name":
             scored_results.sort(key=lambda x: x[1].name)
@@ -214,6 +302,107 @@ def get_search_router(store: FeatureStore) -> APIRouter:
         total = len(scored_results)
         start = (page - 1) * effective_limit
         page_results = [r for _, r in scored_results[start : start + effective_limit]]
+
+        return SearchResponse(
+            query=query,
+            results=page_results,
+            total=total,
+            page=page,
+            limit=effective_limit,
+        )
+
+    return router
+
+
+def get_cross_project_search_router(store: FeatureStore) -> APIRouter:
+    """Router for Level 1 cross-project search (GET /v1/search)."""
+    router = APIRouter(tags=["iceberg-catalog-search-cross-project"])
+
+    @router.get("/search")
+    def search_all_projects(
+        query: str = Query(
+            default="",
+            description="Text search query (matches name, description, and property values). Empty string returns all assets.",
+        ),
+        projects: Optional[List[str]] = Query(
+            default=None,
+            description="Restrict search to specific Feast projects (K8s namespaces). Searches all if omitted.",
+        ),
+        namespace: Optional[str] = Query(
+            default=None,
+            description="Restrict search to a single collection name within each project.",
+        ),
+        namespaces: Optional[List[str]] = Query(
+            default=None,
+            description="Restrict search to these collection names within each project.",
+        ),
+        properties: Optional[List[str]] = Query(
+            default=None,
+            description="Property filters as 'key:value' pairs. All must match.",
+        ),
+        type_filter: Optional[str] = Query(
+            default=None,
+            alias="type",
+            description="Filter by asset type: table, volume, collection.",
+        ),
+        asset_type: Optional[str] = Query(
+            default=None,
+            description="Filter by asset type (alternative to 'type' parameter).",
+        ),
+        sort_by: str = Query(
+            default="score",
+            description="Sort results by 'score' (relevance, descending) or 'name' (alphabetical).",
+        ),
+        page: int = Query(default=1, ge=1, description="Page number (1-indexed)."),
+        page_size: Optional[int] = Query(
+            default=None,
+            ge=1,
+            le=500,
+            description="Results per page.",
+        ),
+        limit: int = Query(
+            default=50, ge=1, le=500, description="Results per page (default when page_size not specified)."
+        ),
+    ) -> SearchResponse:
+        """Search catalog assets across all projects (Level 1).
+
+        Iterates all Feast projects (or those specified by `projects` param),
+        searches each for matching collections, tables, and volumes, then merges
+        and paginates the combined result set.
+        """
+        effective_namespaces = list(namespaces or [])
+        if namespace and namespace not in effective_namespaces:
+            effective_namespaces.append(namespace)
+
+        effective_type = type_filter or asset_type
+        effective_limit = page_size if page_size is not None else limit
+
+        include_collections = len(effective_namespaces) == 0
+
+        # Determine which projects to search
+        all_projects = store.registry.list_projects(allow_cache=False)
+        if projects:
+            project_names = [p.name for p in all_projects if p.name in projects]
+        else:
+            project_names = [p.name for p in all_projects]
+
+        # Fan out search across projects
+        all_scored_results: list[tuple[int, SearchResult]] = []
+        for project_name in project_names:
+            project_results = _search_project(
+                store, project_name, query, effective_namespaces,
+                effective_type, properties, include_collections
+            )
+            all_scored_results.extend(project_results)
+
+        if sort_by == "name":
+            all_scored_results.sort(key=lambda x: x[1].name)
+        else:
+            all_scored_results.sort(key=lambda x: x[0], reverse=True)
+
+        total = len(all_scored_results)
+        start = (page - 1) * effective_limit
+        page_results = [r for _, r in all_scored_results[start : start + effective_limit]]
 
         return SearchResponse(
             query=query,

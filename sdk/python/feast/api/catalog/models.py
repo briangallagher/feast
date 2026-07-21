@@ -209,6 +209,7 @@ class SearchResult(BaseModel):
     description: Optional[str] = None
     properties: Dict[str, str] = {}
     score: int = 0
+    project: Optional[str] = None
 
 
 class SearchResponse(BaseModel):
