@@ -7,6 +7,12 @@ Three search levels:
   GET /v1/{prefix}/search     — Level 2: single project (all collections within)
   GET /v1/{prefix}/search?namespace=X — Level 3: single collection (tables+volumes only)
 
+Level 1 performs server-side SSAR batch checking (DD-09): the endpoint
+determines which projects the caller can access, iterates all permitted
+projects in-process, and returns merged ranked results. This enables
+notebooks, engines, and the dashboard to all perform cross-namespace
+search without BFF orchestration.
+
 Extension of the Iceberg REST Catalog API (which has no search endpoint).
 Searches catalog-managed SavedDatasets stored in the Feast registry.
 No database changes required — reads existing SavedDataset tags and project metadata.
@@ -16,7 +22,7 @@ import json
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
 from feast import FeatureStore
 from feast.api.catalog.mapping import CATALOG_MANAGED_TAG
@@ -314,12 +320,69 @@ def get_search_router(store: FeatureStore) -> APIRouter:
     return router
 
 
+async def _get_ssar_permitted_projects(
+    request: Request,
+    candidate_projects: List[str],
+) -> List[str]:
+    """Batch-check SSAR to determine which projects the caller can access.
+
+    Imports from ssar module to reuse the cache and K8s client setup.
+    Returns the subset of candidate_projects the caller is authorized for.
+    If SSAR is disabled, returns all candidates.
+    """
+    import os
+    if os.environ.get("DATACATALOG_SSAR_ENABLED", "true").lower() == "false":
+        return candidate_projects
+
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return []
+
+    token = auth_header[7:]
+
+    from feast.api.catalog.ssar import _check_ssar, SSARCache
+
+    if not hasattr(_get_ssar_permitted_projects, "_cache"):
+        _get_ssar_permitted_projects._cache = SSARCache()
+    cache = _get_ssar_permitted_projects._cache
+
+    permitted = []
+    token_hash = hash(token)
+
+    for project in candidate_projects:
+        cache_key = (token_hash, project, "tables", "list")
+        cached = cache.get(cache_key)
+        if cached is not None:
+            if cached:
+                permitted.append(project)
+            continue
+        try:
+            allowed = await _check_ssar(token, "tables", "list", project)
+            cache.put(cache_key, allowed)
+            if allowed:
+                permitted.append(project)
+        except Exception:
+            logger.warning("SSAR check failed for project %s, skipping", project)
+            continue
+
+    return permitted
+
+
 def get_cross_project_search_router(store: FeatureStore) -> APIRouter:
-    """Router for Level 1 cross-project search (GET /v1/search)."""
+    """Router for Level 1 cross-project search (GET /v1/search).
+
+    This endpoint performs server-side SSAR batch checking (DD-09):
+    it determines which projects the caller can access, iterates all
+    permitted projects in-process, and returns merged ranked results.
+
+    The SSAR middleware skips this route (no {prefix} to extract a
+    namespace from), so authorization is handled inline here.
+    """
     router = APIRouter(tags=["iceberg-catalog-search-cross-project"])
 
     @router.get("/search")
-    def search_all_projects(
+    async def search_all_projects(
+        request: Request,
         query: str = Query(
             default="",
             description="Text search query (matches name, description, and property values). Empty string returns all assets.",
@@ -366,10 +429,30 @@ def get_cross_project_search_router(store: FeatureStore) -> APIRouter:
     ) -> SearchResponse:
         """Search catalog assets across all projects (Level 1).
 
-        Iterates all Feast projects (or those specified by `projects` param),
-        searches each for matching collections, tables, and volumes, then merges
-        and paginates the combined result set.
+        Server-side SSAR batch check (DD-09): determines which projects the
+        caller can access via batch SelfSubjectAccessReview, then iterates all
+        permitted projects in-process against the shared registry. Returns
+        merged, ranked, paginated results.
+
+        This replaces the BFF-side fan-out pattern, enabling notebooks, engines,
+        and pipelines to perform cross-namespace search directly.
         """
+        import os
+        ssar_enabled = os.environ.get("DATACATALOG_SSAR_ENABLED", "true").lower() != "false"
+        auth_header = request.headers.get("Authorization", "")
+        if ssar_enabled and not auth_header.startswith("Bearer "):
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": {
+                        "message": "Authentication required. Provide a bearer token in the Authorization header.",
+                        "type": "NotAuthorizedException",
+                        "code": 401,
+                    }
+                },
+            )
+
         effective_namespaces = list(namespaces or [])
         if namespace and namespace not in effective_namespaces:
             effective_namespaces.append(namespace)
@@ -379,16 +462,22 @@ def get_cross_project_search_router(store: FeatureStore) -> APIRouter:
 
         include_collections = len(effective_namespaces) == 0
 
-        # Determine which projects to search
         all_projects = store.registry.list_projects(allow_cache=False)
         if projects:
-            project_names = [p.name for p in all_projects if p.name in projects]
+            candidate_names = [p.name for p in all_projects if p.name in projects]
         else:
-            project_names = [p.name for p in all_projects]
+            candidate_names = [p.name for p in all_projects]
 
-        # Fan out search across projects
+        # Server-side SSAR batch check — filter to permitted projects only
+        permitted_projects = await _get_ssar_permitted_projects(request, candidate_names)
+
+        logger.info(
+            "Cross-project search: query=%r, candidates=%d, permitted=%d",
+            query, len(candidate_names), len(permitted_projects),
+        )
+
         all_scored_results: list[tuple[int, SearchResult]] = []
-        for project_name in project_names:
+        for project_name in permitted_projects:
             project_results = _search_project(
                 store, project_name, query, effective_namespaces,
                 effective_type, properties, include_collections
@@ -410,6 +499,7 @@ def get_cross_project_search_router(store: FeatureStore) -> APIRouter:
             total=total,
             page=page,
             limit=effective_limit,
+            searched_projects=permitted_projects,
         )
 
     return router

@@ -218,3 +218,4 @@ class SearchResponse(BaseModel):
     total: int = 0
     page: int = 1
     limit: int = 50
+    searched_projects: Optional[List[str]] = None

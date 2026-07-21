@@ -275,6 +275,8 @@ class SSARMiddleware(BaseHTTPMiddleware):
 
         prefix = _extract_prefix(path)
         if not prefix:
+            # Routes without a {prefix} (e.g. GET /v1/search, GET /v1/config)
+            # handle their own authorization or are public. See DD-09.
             return await call_next(request)
 
         auth_header = request.headers.get("Authorization", "")
