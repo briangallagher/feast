@@ -23,7 +23,7 @@ SECRET_FIELD_TO_ICEBERG_CONFIG = {
     "AWS_DEFAULT_REGION": "client.region",
 }
 
-MANAGED_LABEL = "opendatahub.io/managed"
+MANAGED_LABELS = ("opendatahub.io/dashboard", "opendatahub.io/managed")
 
 
 def _get_k8s_client():
@@ -73,10 +73,10 @@ def resolve_connection(
         return None
 
     labels = secret.metadata.labels or {}
-    if labels.get(MANAGED_LABEL) != "true":
+    if not any(labels.get(lbl) == "true" for lbl in MANAGED_LABELS):
         logger.warning(
-            "Secret '%s' in namespace '%s' lacks label %s=true — refusing to read",
-            connection_name, namespace, MANAGED_LABEL,
+            "Secret '%s' in namespace '%s' lacks any managed label (%s) — refusing to read",
+            connection_name, namespace, ", ".join(MANAGED_LABELS),
         )
         return None
 
