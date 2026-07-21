@@ -49,7 +49,7 @@ def get_namespace_router(store: FeatureStore) -> APIRouter:
             raise NamespaceNotFoundException(prefix)
 
     def _list_collections(prefix: str) -> set[str]:
-        """Gather unique SavedDataset.namespace values in the project."""
+        """Gather collections from both asset namespaces and explicit _ns_meta_ tags."""
         catalog_datasets = store.registry.list_saved_datasets(
             project=prefix,
             allow_cache=True,
@@ -58,6 +58,19 @@ def get_namespace_router(store: FeatureStore) -> APIRouter:
         seen = set()
         for ds in catalog_datasets:
             seen.add(ds.namespace or DEFAULT_SCHEMA)
+
+        # Include explicitly created collections (may be empty — no assets yet)
+        try:
+            project = store.registry.get_project(prefix, allow_cache=True)
+            if project.tags:
+                for tag_key in project.tags:
+                    if tag_key.startswith("_ns_meta_"):
+                        ns_name = tag_key[len("_ns_meta_"):]
+                        if ns_name:
+                            seen.add(ns_name)
+        except FeastObjectNotFoundException:
+            pass
+
         return seen
 
     @router.get("/{prefix}/namespaces")
