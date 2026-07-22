@@ -26,8 +26,15 @@ SECRET_FIELD_TO_ICEBERG_CONFIG = {
 MANAGED_LABELS = ("opendatahub.io/dashboard", "opendatahub.io/managed")
 
 
+_k8s_core_client = None
+
+
 def _get_k8s_client():
-    """Lazy-initialize and return a Kubernetes CoreV1Api client."""
+    """Lazy-initialize and return a cached Kubernetes CoreV1Api client."""
+    global _k8s_core_client
+    if _k8s_core_client is not None:
+        return _k8s_core_client
+
     from kubernetes import client as k8s_client
     from kubernetes import config as k8s_config
 
@@ -36,7 +43,8 @@ def _get_k8s_client():
     except k8s_config.ConfigException:
         k8s_config.load_kube_config()
 
-    return k8s_client.CoreV1Api()
+    _k8s_core_client = k8s_client.CoreV1Api()
+    return _k8s_core_client
 
 
 def resolve_connection(

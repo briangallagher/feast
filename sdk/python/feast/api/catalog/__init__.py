@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 
 from feast import FeatureStore
 from feast.api.catalog.credentials import create_vender_from_env
@@ -28,6 +28,7 @@ CATALOG_ENDPOINTS = [
     "POST /v1/{prefix}/namespaces/{namespace}/tables/{table}",
     "DELETE /v1/{prefix}/namespaces/{namespace}/tables/{table}",
     # Extensions
+    "GET /v1/projects",
     "GET /v1/search",
     "GET /v1/{prefix}/search",
     "GET /v1/{prefix}/namespaces/{namespace}/volumes",
@@ -86,3 +87,37 @@ def add_catalog_routes(app: FastAPI, store: FeatureStore) -> None:
     )
     app.include_router(get_search_router(store), prefix=prefix)
     app.include_router(get_cross_project_search_router(store), prefix=prefix)
+
+    @app.get(f"{prefix}/projects")
+    async def list_accessible_projects(request: Request):
+        """List Feast projects, filtered by SSAR access when enabled.
+
+        Used by the UI project dropdown to show only namespaces the user can access.
+        When SSAR is disabled, returns all projects.
+        """
+        from feast.api.catalog.ssar import _check_ssar, _ensure_k8s_config
+        import os
+
+        all_projects = store.registry.list_projects(allow_cache=False)
+        project_names = [p.name for p in all_projects]
+
+        ssar_enabled = os.environ.get("DATACATALOG_SSAR_ENABLED", "true").lower() != "false"
+        if not ssar_enabled:
+            return {"projects": project_names}
+
+        token = None
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+
+        if not token:
+            return {"projects": project_names}
+
+        accessible = []
+        _ensure_k8s_config()
+        for project_name in project_names:
+            allowed = await _check_ssar(token, project_name, "namespaces", "list")
+            if allowed:
+                accessible.append(project_name)
+
+        return {"projects": accessible}
