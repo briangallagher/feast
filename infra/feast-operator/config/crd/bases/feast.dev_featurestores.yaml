@@ -132,6 +132,33 @@ spec:
                     type: object
                     x-kubernetes-map-type: atomic
                 type: object
+              catalog:
+                description: Catalog enables the Iceberg REST Catalog API on this
+                  FeatureStore.
+                properties:
+                  enabled:
+                    description: Enabled activates catalog mode on this FeatureStore.
+                    type: boolean
+                  ssar:
+                    description: SSAR configures the SelfSubjectAccessReview pseudo-resources
+                      for catalog authorization.
+                    properties:
+                      apiGroup:
+                        description: |-
+                          APIGroup is the Kubernetes API group for SSAR pseudo-resources.
+                          Defaults to "datacatalog.opendatahub.io".
+                        type: string
+                      resources:
+                        description: |-
+                          Resources is the list of pseudo-resource types for SSAR checks.
+                          Defaults to ["namespaces", "tables", "volumes"].
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                required:
+                - enabled
+                type: object
               cronJob:
                 description: FeastCronJob defines a CronJob to execute against a Feature
                   Store deployment.
@@ -541,7 +568,7 @@ spec:
                 type: object
               feastProject:
                 description: FeastProject is the Feast project id.
-                pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+                pattern: ^([A-Za-z0-9][A-Za-z0-9_-]*)?$
                 type: string
               feastProjectDir:
                 description: FeastProjectDir defines how to create the feast project
@@ -6131,6 +6158,33 @@ spec:
                         type: object
                         x-kubernetes-map-type: atomic
                     type: object
+                  catalog:
+                    description: Catalog enables the Iceberg REST Catalog API on this
+                      FeatureStore.
+                    properties:
+                      enabled:
+                        description: Enabled activates catalog mode on this FeatureStore.
+                        type: boolean
+                      ssar:
+                        description: SSAR configures the SelfSubjectAccessReview pseudo-resources
+                          for catalog authorization.
+                        properties:
+                          apiGroup:
+                            description: |-
+                              APIGroup is the Kubernetes API group for SSAR pseudo-resources.
+                              Defaults to "datacatalog.opendatahub.io".
+                            type: string
+                          resources:
+                            description: |-
+                              Resources is the list of pseudo-resource types for SSAR checks.
+                              Defaults to ["namespaces", "tables", "volumes"].
+                            items:
+                              type: string
+                            type: array
+                        type: object
+                    required:
+                    - enabled
+                    type: object
                   cronJob:
                     description: FeastCronJob defines a CronJob to execute against
                       a Feature Store deployment.
@@ -6544,7 +6598,7 @@ spec:
                     type: object
                   feastProject:
                     description: FeastProject is the Feast project id.
-                    pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+                    pattern: ^([A-Za-z0-9][A-Za-z0-9_-]*)?$
                     type: string
                   feastProjectDir:
                     description: FeastProjectDir defines how to create the feast project
@@ -12284,6 +12338,26 @@ spec:
                 x-kubernetes-validations:
                 - message: One selection required between kubernetes or oidc.
                   rule: '[has(self.kubernetes), has(self.oidc)].exists_one(c, c)'
+              catalog:
+                description: CatalogSpec enables the Iceberg REST Catalog API mode
+                  on a FeatureStore deployment.
+                properties:
+                  enabled:
+                    type: boolean
+                  ssar:
+                    description: CatalogSSARConfig defines the API group and resources
+                      used for SSAR authorization checks.
+                    properties:
+                      apiGroup:
+                        type: string
+                      resources:
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                required:
+                - enabled
+                type: object
               cronJob:
                 description: FeastCronJob defines a CronJob to execute against a Feature
                   Store deployment.
@@ -12683,7 +12757,7 @@ spec:
                 type: object
               feastProject:
                 description: FeastProject is the Feast project id.
-                pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+                pattern: ^([A-Za-z0-9][A-Za-z0-9_-]*)?$
                 type: string
               feastProjectDir:
                 description: FeastProjectDir defines how to create the feast project
@@ -16544,6 +16618,26 @@ spec:
                     - message: One selection required between kubernetes or oidc.
                       rule: '[has(self.kubernetes), has(self.oidc)].exists_one(c,
                         c)'
+                  catalog:
+                    description: CatalogSpec enables the Iceberg REST Catalog API
+                      mode on a FeatureStore deployment.
+                    properties:
+                      enabled:
+                        type: boolean
+                      ssar:
+                        description: CatalogSSARConfig defines the API group and resources
+                          used for SSAR authorization checks.
+                        properties:
+                          apiGroup:
+                            type: string
+                          resources:
+                            items:
+                              type: string
+                            type: array
+                        type: object
+                    required:
+                    - enabled
+                    type: object
                   cronJob:
                     description: FeastCronJob defines a CronJob to execute against
                       a Feature Store deployment.
@@ -16947,7 +17041,7 @@ spec:
                     type: object
                   feastProject:
                     description: FeastProject is the Feast project id.
-                    pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+                    pattern: ^([A-Za-z0-9][A-Za-z0-9_-]*)?$
                     type: string
                   feastProjectDir:
                     description: FeastProjectDir defines how to create the feast project
