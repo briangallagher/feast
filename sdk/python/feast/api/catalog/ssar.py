@@ -49,11 +49,22 @@ RESOURCE_CONTEXT_PATTERN = re.compile(
 )
 
 
+_RESERVED_TOP_ROUTES = {"search", "config"}
+
+
 def _extract_prefix(path: str) -> Optional[str]:
-    """Extract the {prefix} segment from /v1/{prefix}/..."""
+    """Extract the {prefix} segment from /v1/{prefix}/...
+
+    Returns None for top-level routes like /v1/search and /v1/config which
+    are not scoped to a single project and handle their own authorization.
+    See DD-09 for cross-project search authorization.
+    """
     parts = path.strip("/").split("/")
     if len(parts) >= 2 and parts[0] == "v1":
-        return parts[1]
+        candidate = parts[1]
+        if candidate in _RESERVED_TOP_ROUTES:
+            return None
+        return candidate
     return None
 
 

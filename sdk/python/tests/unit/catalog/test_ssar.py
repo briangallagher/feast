@@ -34,6 +34,18 @@ class TestExtractPrefix:
     def test_trailing_slash_stripped(self):
         assert _extract_prefix("/v1/proj/") == "proj"
 
+    def test_search_route_returns_none(self):
+        assert _extract_prefix("/v1/search") is None
+
+    def test_config_route_returns_none(self):
+        assert _extract_prefix("/v1/config") is None
+
+    def test_search_with_trailing_slash_returns_none(self):
+        assert _extract_prefix("/v1/search/") is None
+
+    def test_project_named_search_prefix_still_works(self):
+        assert _extract_prefix("/v1/my-search-project/namespaces") == "my-search-project"
+
 
 # ---------------------------------------------------------------------------
 # _map_to_resource
