@@ -1,8 +1,12 @@
+import logging
 from typing import Optional
 
 from fastapi import FastAPI, Query, Request
 
 from feast import FeatureStore
+
+logger = logging.getLogger(__name__)
+from feast.api.catalog.catalog_api import get_catalog_api_router
 from feast.api.catalog.credentials import create_vender_from_env
 from feast.api.catalog.errors import register_iceberg_exception_handlers
 from feast.api.catalog.metadata_reader import create_reader_from_env
@@ -87,6 +91,11 @@ def add_catalog_routes(app: FastAPI, store: FeatureStore) -> None:
     )
     app.include_router(get_search_router(store), prefix=prefix)
     app.include_router(get_cross_project_search_router(store), prefix=prefix)
+
+    # Proprietary Catalog API — user-facing, all asset types
+    catalog_api_prefix = "/catalog"
+    app.include_router(get_catalog_api_router(store), prefix=catalog_api_prefix)
+    logger.info("Proprietary Catalog API mounted at %s/*", catalog_api_prefix)
 
     @app.get(f"{prefix}/projects")
     async def list_accessible_projects(request: Request):
