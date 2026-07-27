@@ -63,7 +63,11 @@ def get_table_router(
             allow_cache=False,
             tags={CATALOG_MANAGED_TAG: "true", "asset_type": TABLE_ASSET_TYPE},
         )
-        filtered = [ds for ds in datasets if (ds.namespace or DEFAULT_SCHEMA) == ns_name]
+        filtered = [
+            ds for ds in datasets
+            if (ds.namespace or DEFAULT_SCHEMA) == ns_name
+            and ds.tags.get("format") == "iceberg"
+        ]
         return ListTablesResponse(
             identifiers=[
                 TableIdentifier(
@@ -128,6 +132,8 @@ def get_table_router(
         except FeastObjectNotFoundException:
             raise TableNotFoundException(namespace, table)
         if not _is_table(ds):
+            raise TableNotFoundException(namespace, table)
+        if ds.tags.get("format") != "iceberg":
             raise TableNotFoundException(namespace, table)
         location = ds.tags.get("location", "")
 
