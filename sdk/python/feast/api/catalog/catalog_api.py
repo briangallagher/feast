@@ -12,7 +12,6 @@ with prefix="" (the caller sets the mount prefix).
 
 import json
 import logging
-import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -252,35 +251,15 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
     # -----------------------------------------------------------------------
 
     @router.get("/projects")
-    async def list_projects(request: Request) -> ProjectListResponse:
-        """List RHAI namespaces, with optional SSAR filtering."""
+    async def list_projects() -> ProjectListResponse:
+        """List RHAI namespaces.
+
+        Authorization is handled by kube-rbac-proxy before requests reach
+        this endpoint, so we simply return all known namespaces.
+        """
         ensure_catalog_project(store)
         namespace_names = sorted(list_rhai_namespaces(store))
-
-        ssar_enabled = (
-            os.environ.get("DATACATALOG_SSAR_ENABLED", "true").lower() != "false"
-        )
-        if not ssar_enabled:
-            return ProjectListResponse(projects=namespace_names)
-
-        auth_header = request.headers.get("authorization", "")
-        if not auth_header.startswith("Bearer "):
-            return ProjectListResponse(projects=namespace_names)
-
-        token = auth_header[7:]
-        try:
-            from feast.api.catalog.ssar import _check_ssar, _ensure_k8s_config
-
-            _ensure_k8s_config()
-            accessible = []
-            for name in namespace_names:
-                allowed = await _check_ssar(token, name, "namespaces", "list")
-                if allowed:
-                    accessible.append(name)
-            return ProjectListResponse(projects=accessible)
-        except Exception:
-            logger.warning("SSAR filtering failed, returning all namespaces")
-            return ProjectListResponse(projects=namespace_names)
+        return ProjectListResponse(projects=namespace_names)
 
     # -----------------------------------------------------------------------
     # Collections
@@ -859,7 +838,7 @@ def get_generic_tables_router(store: FeatureStore) -> APIRouter:
             "location": location,
             "connection-ref": body.connection_ref or "",
             "description": body.description or "",
-            "registered_by": request.headers.get("kubeflow-userid", "unknown"),
+            "registered_by": request.headers.get("X-User") or request.headers.get("kubeflow-userid", "unknown"),
         }
         if col_meta:
             tags["_col_meta"] = json.dumps(col_meta)

@@ -12,9 +12,7 @@ Three search levels:
   GET /v1/{prefix}/search     -- Level 2: single RHAI namespace (all collections within)
   GET /v1/{prefix}/search?namespace=X -- Level 3: single collection (tables+volumes only)
 
-Level 1 performs server-side SSAR batch checking (DD-09): the endpoint
-determines which RHAI namespaces the caller can access, iterates all
-permitted namespaces in-process, and returns merged ranked results.
+Authorization is handled by kube-rbac-proxy before requests reach this code.
 
 Extension of the Iceberg REST Catalog API (which has no search endpoint).
 Searches catalog-managed SavedDatasets stored in the Feast registry.
@@ -24,7 +22,7 @@ import json
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query
 
 from feast import FeatureStore
 from feast.api.catalog.mapping import (
@@ -32,7 +30,6 @@ from feast.api.catalog.mapping import (
     CATALOG_PROJECT,
     DEFAULT_COLLECTION,
     list_collections_for_ns,
-    list_rhai_namespaces,
     parse_display_name,
 )
 from feast.api.catalog.models import SearchResponse, SearchResult
@@ -338,208 +335,6 @@ def get_search_router(store: FeatureStore) -> APIRouter:
             total=total,
             page=page,
             limit=effective_limit,
-        )
-
-    return router
-
-
-async def _get_ssar_permitted_namespaces(
-    request: Request,
-    candidate_namespaces: List[str],
-) -> List[str]:
-    """Batch-check SSAR to determine which RHAI namespaces the caller can access.
-
-    Imports from ssar module to reuse the cache and K8s client setup.
-    Returns the subset of candidate_namespaces the caller is authorized for.
-    If SSAR is disabled, returns all candidates.
-    """
-    import os
-
-    if os.environ.get("DATACATALOG_SSAR_ENABLED", "true").lower() == "false":
-        return candidate_namespaces
-
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return []
-
-    token = auth_header[7:]
-
-    from feast.api.catalog.ssar import SSARCache, _check_ssar
-
-    if not hasattr(_get_ssar_permitted_namespaces, "_cache"):
-        _get_ssar_permitted_namespaces._cache = SSARCache()
-    cache = _get_ssar_permitted_namespaces._cache
-
-    permitted = []
-    token_hash = hash(token)
-
-    for ns_name in candidate_namespaces:
-        cache_key = (token_hash, ns_name, "tables", "list")
-        cached = cache.get(cache_key)
-        if cached is not None:
-            if cached:
-                permitted.append(ns_name)
-            continue
-        try:
-            allowed = await _check_ssar(token, "tables", "list", ns_name)
-            cache.put(cache_key, allowed)
-            if allowed:
-                permitted.append(ns_name)
-        except Exception:
-            logger.warning("SSAR check failed for namespace %s, skipping", ns_name)
-            continue
-
-    return permitted
-
-
-def get_cross_project_search_router(store: FeatureStore) -> APIRouter:
-    """Router for Level 1 cross-namespace search (GET /v1/search).
-
-    This endpoint performs server-side SSAR batch checking (DD-09):
-    it determines which RHAI namespaces the caller can access, iterates
-    all permitted namespaces in-process, and returns merged ranked results.
-
-    The SSAR middleware skips this route (no {prefix} to extract a
-    namespace from), so authorization is handled inline here.
-    """
-    router = APIRouter(tags=["iceberg-catalog-search-cross-project"])
-
-    @router.get("/search")
-    async def search_all_namespaces(
-        request: Request,
-        query: str = Query(
-            default="",
-            description="Text search query (matches name, description, and property values). Empty string returns all assets.",
-        ),
-        projects: Optional[List[str]] = Query(
-            default=None,
-            description="Restrict search to specific RHAI namespaces. Searches all if omitted.",
-        ),
-        namespace: Optional[str] = Query(
-            default=None,
-            description="Restrict search to a single collection name within each namespace.",
-        ),
-        namespaces: Optional[List[str]] = Query(
-            default=None,
-            description="Restrict search to these collection names within each namespace.",
-        ),
-        properties: Optional[List[str]] = Query(
-            default=None,
-            description="Property filters as 'key:value' pairs. All must match.",
-        ),
-        type_filter: Optional[str] = Query(
-            default=None,
-            alias="type",
-            description="Filter by asset type: table, volume, collection.",
-        ),
-        asset_type: Optional[str] = Query(
-            default=None,
-            description="Filter by asset type (alternative to 'type' parameter).",
-        ),
-        sort_by: str = Query(
-            default="score",
-            description="Sort results by 'score' (relevance, descending) or 'name' (alphabetical).",
-        ),
-        page: int = Query(default=1, ge=1, description="Page number (1-indexed)."),
-        page_size: Optional[int] = Query(
-            default=None,
-            ge=1,
-            le=500,
-            description="Results per page.",
-        ),
-        limit: int = Query(
-            default=50,
-            ge=1,
-            le=500,
-            description="Results per page (default when page_size not specified).",
-        ),
-    ) -> SearchResponse:
-        """Search catalog assets across all RHAI namespaces (Level 1).
-
-        Server-side SSAR batch check (DD-09): determines which namespaces the
-        caller can access via batch SelfSubjectAccessReview, then iterates all
-        permitted namespaces in-process against the shared registry.  Returns
-        merged, ranked, paginated results.
-        """
-        import os
-
-        ssar_enabled = (
-            os.environ.get("DATACATALOG_SSAR_ENABLED", "true").lower() != "false"
-        )
-        auth_header = request.headers.get("Authorization", "")
-        if ssar_enabled and not auth_header.startswith("Bearer "):
-            from fastapi.responses import JSONResponse
-
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "error": {
-                        "message": "Authentication required. Provide a bearer token in the Authorization header.",
-                        "type": "NotAuthorizedException",
-                        "code": 401,
-                    }
-                },
-            )
-
-        effective_collections = list(namespaces or [])
-        if namespace and namespace not in effective_collections:
-            effective_collections.append(namespace)
-
-        effective_type = type_filter or asset_type
-        effective_limit = page_size if page_size is not None else limit
-
-        include_collections = len(effective_collections) == 0
-
-        # Get distinct RHAI namespaces from datasets + project tags
-        all_rhai_namespaces = sorted(list_rhai_namespaces(store))
-        if projects:
-            candidate_names = [n for n in all_rhai_namespaces if n in projects]
-        else:
-            candidate_names = all_rhai_namespaces
-
-        # Server-side SSAR batch check -- filter to permitted namespaces only
-        permitted_namespaces = await _get_ssar_permitted_namespaces(
-            request, candidate_names
-        )
-
-        logger.info(
-            "Cross-namespace search: query=%r, candidates=%d, permitted=%d",
-            query,
-            len(candidate_names),
-            len(permitted_namespaces),
-        )
-
-        all_scored_results: list[tuple[int, SearchResult]] = []
-        for rhai_ns in permitted_namespaces:
-            ns_results = _search_rhai_namespace(
-                store,
-                rhai_ns,
-                query,
-                effective_collections,
-                effective_type,
-                properties,
-                include_collections,
-            )
-            all_scored_results.extend(ns_results)
-
-        if sort_by == "name":
-            all_scored_results.sort(key=lambda x: x[1].name)
-        else:
-            all_scored_results.sort(key=lambda x: x[0], reverse=True)
-
-        total = len(all_scored_results)
-        start = (page - 1) * effective_limit
-        page_results = [
-            r for _, r in all_scored_results[start : start + effective_limit]
-        ]
-
-        return SearchResponse(
-            query=query,
-            results=page_results,
-            total=total,
-            page=page,
-            limit=effective_limit,
-            searched_projects=permitted_namespaces,
         )
 
     return router
