@@ -69,6 +69,7 @@ class SavedDatasetSpec(_message.Message):
     NAMESPACE_FIELD_NUMBER: _builtins.int
     DATA_SOURCE_REF_FIELD_NUMBER: _builtins.int
     COLUMNS_FIELD_NUMBER: _builtins.int
+    COLLECTION_FIELD_NUMBER: _builtins.int
     name: _builtins.str
     """Name of the dataset. Must be unique since it's possible to overwrite dataset by name"""
     project: _builtins.str
@@ -81,6 +82,8 @@ class SavedDatasetSpec(_message.Message):
     """Sub-grouping within a project. Maps to Iceberg namespace level 2."""
     data_source_ref: _builtins.str
     """Optional reference to a DataSource for connection info."""
+    collection: _builtins.str
+    """Sub-grouping within a namespace. Maps to Iceberg namespace level 3 (collection)."""
     @_builtins.property
     def features(self) -> _containers.RepeatedScalarFieldContainer[_builtins.str]:
         """list of feature references with format "<view name>:<feature name>" """
@@ -113,10 +116,11 @@ class SavedDatasetSpec(_message.Message):
         namespace: _builtins.str = ...,
         data_source_ref: _builtins.str = ...,
         columns: _abc.Iterable[Global___ColumnSchema] | None = ...,
+        collection: _builtins.str = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["storage", b"storage"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["columns", b"columns", "data_source_ref", b"data_source_ref", "feature_service_name", b"feature_service_name", "features", b"features", "full_feature_names", b"full_feature_names", "join_keys", b"join_keys", "name", b"name", "namespace", b"namespace", "project", b"project", "storage", b"storage", "tags", b"tags"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["collection", b"collection", "columns", b"columns", "data_source_ref", b"data_source_ref", "feature_service_name", b"feature_service_name", "features", b"features", "full_feature_names", b"full_feature_names", "join_keys", b"join_keys", "name", b"name", "namespace", b"namespace", "project", b"project", "storage", b"storage", "tags", b"tags"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 

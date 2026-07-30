@@ -330,7 +330,7 @@ class CachingRegistry(BaseRegistry):
 
     @abstractmethod
     def _list_saved_datasets(
-        self, project: str, tags: Optional[dict[str, str]] = None
+        self, project: str, tags: Optional[dict[str, str]] = None, collection: str = ""
     ) -> List[SavedDataset]:
         pass
 
@@ -340,13 +340,14 @@ class CachingRegistry(BaseRegistry):
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
         namespace: str = "",
+        collection: str = "",
     ) -> List[SavedDataset]:
         if allow_cache:
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.list_saved_datasets(
-                self.cached_registry_proto, project, tags, namespace=namespace
+                self.cached_registry_proto, project, tags, namespace=namespace, collection=collection
             )
-        return self._list_saved_datasets(project, tags)
+        return self._list_saved_datasets(project, tags, collection=collection)
 
     @abstractmethod
     def _get_validation_reference(self, name: str, project: str) -> ValidationReference:

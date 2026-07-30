@@ -1,21 +1,23 @@
 """
-Multi-level catalog search with cross-project support, collection discovery,
+Multi-level catalog search with cross-namespace support, collection discovery,
 property filtering, relevance scoring, and pagination.
 
+Single-project model: all assets live under CATALOG_PROJECT ("data-registry").
+RHAI namespaces are stored in SavedDataset.namespace; collections in
+SavedDataset.collection.  Scoped names encode both:
+  "insurance-demo/claims/auto-claims"
+
 Three search levels:
-  GET /v1/search              — Level 1: cross-project (all accessible namespaces)
-  GET /v1/{prefix}/search     — Level 2: single project (all collections within)
-  GET /v1/{prefix}/search?namespace=X — Level 3: single collection (tables+volumes only)
+  GET /v1/search              -- Level 1: cross-namespace (all accessible RHAI namespaces)
+  GET /v1/{prefix}/search     -- Level 2: single RHAI namespace (all collections within)
+  GET /v1/{prefix}/search?namespace=X -- Level 3: single collection (tables+volumes only)
 
 Level 1 performs server-side SSAR batch checking (DD-09): the endpoint
-determines which projects the caller can access, iterates all permitted
-projects in-process, and returns merged ranked results. This enables
-notebooks, engines, and the dashboard to all perform cross-namespace
-search without BFF orchestration.
+determines which RHAI namespaces the caller can access, iterates all
+permitted namespaces in-process, and returns merged ranked results.
 
 Extension of the Iceberg REST Catalog API (which has no search endpoint).
 Searches catalog-managed SavedDatasets stored in the Feast registry.
-No database changes required — reads existing SavedDataset tags and project metadata.
 """
 
 import json
@@ -25,9 +27,15 @@ from typing import List, Optional
 from fastapi import APIRouter, Query, Request
 
 from feast import FeatureStore
-from feast.api.catalog.mapping import CATALOG_MANAGED_TAG
+from feast.api.catalog.mapping import (
+    CATALOG_MANAGED_TAG,
+    CATALOG_PROJECT,
+    DEFAULT_COLLECTION,
+    list_collections_for_ns,
+    list_rhai_namespaces,
+    parse_display_name,
+)
 from feast.api.catalog.models import SearchResponse, SearchResult
-from feast.api.catalog.namespaces import DEFAULT_SCHEMA
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +44,12 @@ def _compute_match_score(query: str, name: str, description: str, tags: dict) ->
     """Score a catalog asset against a search query.
 
     Scoring tiers (highest match wins):
-      100 — exact name match (case-insensitive)
-       90 — query is a substring of the name
-       80 — query is a substring of the description
-       60 — query matches a property/tag value
-       40 — fuzzy match (≥75% character overlap with name)
-        0 — no match
+      100 -- exact name match (case-insensitive)
+       90 -- query is a substring of the name
+       80 -- query is a substring of the description
+       60 -- query matches a property/tag value
+       40 -- fuzzy match (>=75% character overlap with name)
+        0 -- no match
     """
     q = query.lower()
 
@@ -79,7 +87,7 @@ def _fuzzy_overlap(a: str, b: str) -> float:
 def _matches_property_filters(tags: dict, filters: List[str]) -> bool:
     """Check if all property filters match the asset's tags.
 
-    Each filter is 'key:value' — both are case-insensitive substring matches.
+    Each filter is 'key:value' -- both are case-insensitive substring matches.
     """
     for f in filters:
         if ":" not in f:
@@ -97,9 +105,11 @@ def _matches_property_filters(tags: dict, filters: List[str]) -> bool:
     return True
 
 
-def _get_collection_metadata(project_tags: dict, collection_name: str) -> dict:
-    """Extract metadata for a collection from project-level _ns_meta_ tags."""
-    meta_key = f"_ns_meta_{collection_name}"
+def _get_collection_metadata(
+    project_tags: dict, rhai_ns: str, collection_name: str
+) -> dict:
+    """Extract metadata for a collection from _ns_{rhai_ns}_{collection} tags."""
+    meta_key = f"_ns_{rhai_ns}_{collection_name}"
     raw = project_tags.get(meta_key)
     if raw:
         try:
@@ -109,55 +119,45 @@ def _get_collection_metadata(project_tags: dict, collection_name: str) -> dict:
     return {}
 
 
-def _search_project(
+def _search_rhai_namespace(
     store: FeatureStore,
-    prefix: str,
+    rhai_ns: str,
     query: str,
-    effective_namespaces: List[str],
+    effective_collections: List[str],
     effective_type: Optional[str],
     properties: Optional[List[str]],
     include_collections: bool,
 ) -> List[tuple]:
-    """Search within a single project, returning scored (score, SearchResult) tuples."""
+    """Search within a single RHAI namespace, returning scored (score, SearchResult) tuples."""
     scored_results: list[tuple[int, SearchResult]] = []
 
     try:
-        project = store.registry.get_project(prefix, allow_cache=False)
+        project = store.registry.get_project(CATALOG_PROJECT, allow_cache=False)
     except Exception:
         return scored_results
 
     project_tags = dict(project.tags) if project.tags else {}
 
-    # Search collections (namespaces) as entities — Level 1 and 2 only
-    if include_collections and (effective_type is None or effective_type == "collection"):
-        datasets = store.registry.list_saved_datasets(
-            project=prefix,
-            allow_cache=False,
-            tags={CATALOG_MANAGED_TAG: "true"},
-        )
-        collections: set[str] = set()
-        for ds in datasets:
-            collections.add(ds.namespace or DEFAULT_SCHEMA)
-
-        # Also include collections from _ns_meta_ tags (may exist without assets)
-        for tag_key in project_tags:
-            if tag_key.startswith("_ns_meta_"):
-                ns_name = tag_key[len("_ns_meta_"):]
-                if ns_name:
-                    collections.add(ns_name)
+    # Search collections as entities -- Level 1 and 2 only
+    if include_collections and (
+        effective_type is None or effective_type == "collection"
+    ):
+        collections = list_collections_for_ns(store, rhai_ns)
 
         for coll_name in collections:
-            if effective_namespaces and coll_name not in effective_namespaces:
+            if effective_collections and coll_name not in effective_collections:
                 continue
 
-            coll_meta = _get_collection_metadata(project_tags, coll_name)
+            coll_meta = _get_collection_metadata(project_tags, rhai_ns, coll_name)
             coll_description = coll_meta.get("description", "")
 
             if properties and not _matches_property_filters(coll_meta, properties):
                 continue
 
             if query:
-                score = _compute_match_score(query, coll_name, coll_description, coll_meta)
+                score = _compute_match_score(
+                    query, coll_name, coll_description, coll_meta
+                )
                 if score == 0:
                     continue
             else:
@@ -171,30 +171,42 @@ def _search_project(
                         namespace=[coll_name],
                         name=coll_name,
                         description=coll_description or None,
-                        properties={k: v for k, v in coll_meta.items() if not k.startswith("_")},
+                        properties={
+                            k: v for k, v in coll_meta.items() if not k.startswith("_")
+                        },
                         score=score,
-                        project=prefix,
+                        project=rhai_ns,
                     ),
                 )
             )
+        datasets = None
     else:
         datasets = None
 
     # Search tables and volumes
-    if effective_type is None or effective_type in ("table", "volume", "iceberg_table", "document_collection", "vector_index", "dataset"):
+    if effective_type is None or effective_type in (
+        "table",
+        "volume",
+        "iceberg_table",
+        "document_collection",
+        "vector_index",
+        "dataset",
+    ):
         if datasets is None:
             datasets = store.registry.list_saved_datasets(
-                project=prefix,
+                project=CATALOG_PROJECT,
                 allow_cache=False,
                 tags={CATALOG_MANAGED_TAG: "true"},
+                namespace=rhai_ns,
             )
 
         for ds in datasets:
             ds_asset_type = ds.tags.get("asset_type", "table")
             description = ds.tags.get("comment") or ds.tags.get("description")
-            ds_ns = ds.namespace or DEFAULT_SCHEMA
+            ds_collection = ds.collection or DEFAULT_COLLECTION
+            display_name = parse_display_name(ds.name)
 
-            if effective_namespaces and ds_ns not in effective_namespaces:
+            if effective_collections and ds_collection not in effective_collections:
                 continue
 
             if effective_type and ds_asset_type != effective_type:
@@ -204,13 +216,15 @@ def _search_project(
                 continue
 
             if query:
-                score = _compute_match_score(query, ds.name, description or "", ds.tags)
+                score = _compute_match_score(
+                    query, display_name, description or "", ds.tags
+                )
                 if score == 0:
                     continue
             else:
                 score = 50
 
-            ns = [ds_ns]
+            ns = [ds_collection]
             props = {
                 k: v
                 for k, v in ds.tags.items()
@@ -223,11 +237,11 @@ def _search_project(
                     SearchResult(
                         type=ds_asset_type,
                         namespace=ns,
-                        name=ds.name,
+                        name=display_name,
                         description=description,
                         properties=props,
                         score=score,
-                        project=prefix,
+                        project=rhai_ns,
                     ),
                 )
             )
@@ -247,11 +261,11 @@ def get_search_router(store: FeatureStore) -> APIRouter:
         ),
         namespace: Optional[str] = Query(
             default=None,
-            description="Restrict search to a single namespace name.",
+            description="Restrict search to a single collection name.",
         ),
         namespaces: Optional[List[str]] = Query(
             default=None,
-            description="Restrict search to these namespace names (searches all if omitted).",
+            description="Restrict search to these collection names (searches all if omitted).",
         ),
         properties: Optional[List[str]] = Query(
             default=None,
@@ -278,26 +292,35 @@ def get_search_router(store: FeatureStore) -> APIRouter:
             description="Results per page.",
         ),
         limit: int = Query(
-            default=50, ge=1, le=500, description="Results per page (default when page_size not specified)."
+            default=50,
+            ge=1,
+            le=500,
+            description="Results per page (default when page_size not specified).",
         ),
     ) -> SearchResponse:
-        """Search catalog assets within a single project (Level 2/3).
+        """Search catalog assets within a single RHAI namespace (Level 2/3).
 
-        Level 2: search all collections, tables, and volumes within the project.
+        Level 2: search all collections, tables, and volumes within the namespace.
         Level 3: add ?namespace=X to restrict to a single collection (tables+volumes only).
         """
-        effective_namespaces = list(namespaces or [])
-        if namespace and namespace not in effective_namespaces:
-            effective_namespaces.append(namespace)
+        effective_collections = list(namespaces or [])
+        if namespace and namespace not in effective_collections:
+            effective_collections.append(namespace)
 
         effective_type = type_filter or asset_type
         effective_limit = page_size if page_size is not None else limit
 
-        # Level 3: if namespace filter is set, don't include collections in results
-        include_collections = len(effective_namespaces) == 0
+        # Level 3: if collection filter is set, don't include collections in results
+        include_collections = len(effective_collections) == 0
 
-        scored_results = _search_project(
-            store, prefix, query, effective_namespaces, effective_type, properties, include_collections
+        scored_results = _search_rhai_namespace(
+            store,
+            prefix,
+            query,
+            effective_collections,
+            effective_type,
+            properties,
+            include_collections,
         )
 
         if sort_by == "name":
@@ -320,19 +343,20 @@ def get_search_router(store: FeatureStore) -> APIRouter:
     return router
 
 
-async def _get_ssar_permitted_projects(
+async def _get_ssar_permitted_namespaces(
     request: Request,
-    candidate_projects: List[str],
+    candidate_namespaces: List[str],
 ) -> List[str]:
-    """Batch-check SSAR to determine which projects the caller can access.
+    """Batch-check SSAR to determine which RHAI namespaces the caller can access.
 
     Imports from ssar module to reuse the cache and K8s client setup.
-    Returns the subset of candidate_projects the caller is authorized for.
+    Returns the subset of candidate_namespaces the caller is authorized for.
     If SSAR is disabled, returns all candidates.
     """
     import os
+
     if os.environ.get("DATACATALOG_SSAR_ENABLED", "true").lower() == "false":
-        return candidate_projects
+        return candidate_namespaces
 
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -340,40 +364,40 @@ async def _get_ssar_permitted_projects(
 
     token = auth_header[7:]
 
-    from feast.api.catalog.ssar import _check_ssar, SSARCache
+    from feast.api.catalog.ssar import SSARCache, _check_ssar
 
-    if not hasattr(_get_ssar_permitted_projects, "_cache"):
-        _get_ssar_permitted_projects._cache = SSARCache()
-    cache = _get_ssar_permitted_projects._cache
+    if not hasattr(_get_ssar_permitted_namespaces, "_cache"):
+        _get_ssar_permitted_namespaces._cache = SSARCache()
+    cache = _get_ssar_permitted_namespaces._cache
 
     permitted = []
     token_hash = hash(token)
 
-    for project in candidate_projects:
-        cache_key = (token_hash, project, "tables", "list")
+    for ns_name in candidate_namespaces:
+        cache_key = (token_hash, ns_name, "tables", "list")
         cached = cache.get(cache_key)
         if cached is not None:
             if cached:
-                permitted.append(project)
+                permitted.append(ns_name)
             continue
         try:
-            allowed = await _check_ssar(token, "tables", "list", project)
+            allowed = await _check_ssar(token, "tables", "list", ns_name)
             cache.put(cache_key, allowed)
             if allowed:
-                permitted.append(project)
+                permitted.append(ns_name)
         except Exception:
-            logger.warning("SSAR check failed for project %s, skipping", project)
+            logger.warning("SSAR check failed for namespace %s, skipping", ns_name)
             continue
 
     return permitted
 
 
 def get_cross_project_search_router(store: FeatureStore) -> APIRouter:
-    """Router for Level 1 cross-project search (GET /v1/search).
+    """Router for Level 1 cross-namespace search (GET /v1/search).
 
     This endpoint performs server-side SSAR batch checking (DD-09):
-    it determines which projects the caller can access, iterates all
-    permitted projects in-process, and returns merged ranked results.
+    it determines which RHAI namespaces the caller can access, iterates
+    all permitted namespaces in-process, and returns merged ranked results.
 
     The SSAR middleware skips this route (no {prefix} to extract a
     namespace from), so authorization is handled inline here.
@@ -381,7 +405,7 @@ def get_cross_project_search_router(store: FeatureStore) -> APIRouter:
     router = APIRouter(tags=["iceberg-catalog-search-cross-project"])
 
     @router.get("/search")
-    async def search_all_projects(
+    async def search_all_namespaces(
         request: Request,
         query: str = Query(
             default="",
@@ -389,15 +413,15 @@ def get_cross_project_search_router(store: FeatureStore) -> APIRouter:
         ),
         projects: Optional[List[str]] = Query(
             default=None,
-            description="Restrict search to specific Feast projects (K8s namespaces). Searches all if omitted.",
+            description="Restrict search to specific RHAI namespaces. Searches all if omitted.",
         ),
         namespace: Optional[str] = Query(
             default=None,
-            description="Restrict search to a single collection name within each project.",
+            description="Restrict search to a single collection name within each namespace.",
         ),
         namespaces: Optional[List[str]] = Query(
             default=None,
-            description="Restrict search to these collection names within each project.",
+            description="Restrict search to these collection names within each namespace.",
         ),
         properties: Optional[List[str]] = Query(
             default=None,
@@ -424,24 +448,28 @@ def get_cross_project_search_router(store: FeatureStore) -> APIRouter:
             description="Results per page.",
         ),
         limit: int = Query(
-            default=50, ge=1, le=500, description="Results per page (default when page_size not specified)."
+            default=50,
+            ge=1,
+            le=500,
+            description="Results per page (default when page_size not specified).",
         ),
     ) -> SearchResponse:
-        """Search catalog assets across all projects (Level 1).
+        """Search catalog assets across all RHAI namespaces (Level 1).
 
-        Server-side SSAR batch check (DD-09): determines which projects the
+        Server-side SSAR batch check (DD-09): determines which namespaces the
         caller can access via batch SelfSubjectAccessReview, then iterates all
-        permitted projects in-process against the shared registry. Returns
+        permitted namespaces in-process against the shared registry.  Returns
         merged, ranked, paginated results.
-
-        This replaces the BFF-side fan-out pattern, enabling notebooks, engines,
-        and pipelines to perform cross-namespace search directly.
         """
         import os
-        ssar_enabled = os.environ.get("DATACATALOG_SSAR_ENABLED", "true").lower() != "false"
+
+        ssar_enabled = (
+            os.environ.get("DATACATALOG_SSAR_ENABLED", "true").lower() != "false"
+        )
         auth_header = request.headers.get("Authorization", "")
         if ssar_enabled and not auth_header.startswith("Bearer "):
             from fastapi.responses import JSONResponse
+
             return JSONResponse(
                 status_code=401,
                 content={
@@ -453,36 +481,46 @@ def get_cross_project_search_router(store: FeatureStore) -> APIRouter:
                 },
             )
 
-        effective_namespaces = list(namespaces or [])
-        if namespace and namespace not in effective_namespaces:
-            effective_namespaces.append(namespace)
+        effective_collections = list(namespaces or [])
+        if namespace and namespace not in effective_collections:
+            effective_collections.append(namespace)
 
         effective_type = type_filter or asset_type
         effective_limit = page_size if page_size is not None else limit
 
-        include_collections = len(effective_namespaces) == 0
+        include_collections = len(effective_collections) == 0
 
-        all_projects = store.registry.list_projects(allow_cache=False)
+        # Get distinct RHAI namespaces from datasets + project tags
+        all_rhai_namespaces = sorted(list_rhai_namespaces(store))
         if projects:
-            candidate_names = [p.name for p in all_projects if p.name in projects]
+            candidate_names = [n for n in all_rhai_namespaces if n in projects]
         else:
-            candidate_names = [p.name for p in all_projects]
+            candidate_names = all_rhai_namespaces
 
-        # Server-side SSAR batch check — filter to permitted projects only
-        permitted_projects = await _get_ssar_permitted_projects(request, candidate_names)
+        # Server-side SSAR batch check -- filter to permitted namespaces only
+        permitted_namespaces = await _get_ssar_permitted_namespaces(
+            request, candidate_names
+        )
 
         logger.info(
-            "Cross-project search: query=%r, candidates=%d, permitted=%d",
-            query, len(candidate_names), len(permitted_projects),
+            "Cross-namespace search: query=%r, candidates=%d, permitted=%d",
+            query,
+            len(candidate_names),
+            len(permitted_namespaces),
         )
 
         all_scored_results: list[tuple[int, SearchResult]] = []
-        for project_name in permitted_projects:
-            project_results = _search_project(
-                store, project_name, query, effective_namespaces,
-                effective_type, properties, include_collections
+        for rhai_ns in permitted_namespaces:
+            ns_results = _search_rhai_namespace(
+                store,
+                rhai_ns,
+                query,
+                effective_collections,
+                effective_type,
+                properties,
+                include_collections,
             )
-            all_scored_results.extend(project_results)
+            all_scored_results.extend(ns_results)
 
         if sort_by == "name":
             all_scored_results.sort(key=lambda x: x[1].name)
@@ -491,7 +529,9 @@ def get_cross_project_search_router(store: FeatureStore) -> APIRouter:
 
         total = len(all_scored_results)
         start = (page - 1) * effective_limit
-        page_results = [r for _, r in all_scored_results[start : start + effective_limit]]
+        page_results = [
+            r for _, r in all_scored_results[start : start + effective_limit]
+        ]
 
         return SearchResponse(
             query=query,
@@ -499,7 +539,7 @@ def get_cross_project_search_router(store: FeatureStore) -> APIRouter:
             total=total,
             page=page,
             limit=effective_limit,
-            searched_projects=permitted_projects,
+            searched_projects=permitted_namespaces,
         )
 
     return router

@@ -427,6 +427,7 @@ def list_saved_datasets(
     project: str,
     tags: Optional[dict[str, str]],
     namespace: str = "",
+    collection: str = "",
 ) -> List[SavedDataset]:
     saved_datasets = []
     for saved_dataset in registry_proto.saved_datasets:
@@ -436,6 +437,8 @@ def list_saved_datasets(
             if namespace and saved_dataset.spec.namespace != namespace:
                 continue
             saved_datasets.append(SavedDataset.from_proto(saved_dataset))
+    if collection:
+        saved_datasets = [ds for ds in saved_datasets if ds.collection == collection]
     return saved_datasets
 
 

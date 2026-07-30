@@ -709,6 +709,7 @@ class BaseRegistry(ABC):
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
         namespace: str = "",
+        collection: str = "",
     ) -> List[SavedDataset]:
         """
         Retrieves a list of all saved datasets in specified project

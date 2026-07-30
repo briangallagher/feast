@@ -7,12 +7,15 @@ from feast import FeatureStore
 from feast.api.catalog.connections import resolve_credentials
 from feast.api.catalog.credentials import STSCredentialVender
 from feast.api.catalog.errors import (
-    NamespaceNotFoundException,
     VolumeAlreadyExistsException,
     VolumeNotFoundException,
 )
 from feast.api.catalog.mapping import (
     CATALOG_MANAGED_TAG,
+    CATALOG_PROJECT,
+    DEFAULT_COLLECTION,
+    ensure_catalog_project,
+    make_scoped_name,
     saved_dataset_to_volume_info,
 )
 from feast.api.catalog.models import (
@@ -21,7 +24,7 @@ from feast.api.catalog.models import (
     UpdateVolumeRequest,
     VolumeInfo,
 )
-from feast.api.catalog.namespaces import DEFAULT_SCHEMA, decode_namespace
+from feast.api.catalog.namespaces import decode_namespace
 from feast.errors import FeastObjectNotFoundException
 from feast.saved_dataset import SavedDataset
 
@@ -40,23 +43,30 @@ def get_volume_router(
 ) -> APIRouter:
     router = APIRouter(tags=["iceberg-catalog-volumes"])
 
-    def _ensure_project_exists(prefix: str) -> None:
-        try:
-            store.registry.get_project(prefix, allow_cache=True)
-        except FeastObjectNotFoundException:
-            raise NamespaceNotFoundException(prefix)
+    # ------------------------------------------------------------------
+    # URL mapping:
+    #   prefix    = RHAI namespace  (e.g. "insurance-demo")
+    #   namespace = collection      (e.g. "claims")
+    #   volume    = display name    (e.g. "raw-docs")
+    #
+    # DB name = scoped: "insurance-demo/claims/raw-docs"
+    # project = CATALOG_PROJECT = "data-registry"
+    # ------------------------------------------------------------------
 
     @router.get("/{prefix}/namespaces/{namespace}/volumes")
     def list_volumes(prefix: str, namespace: str) -> ListVolumesResponse:
-        _ensure_project_exists(prefix)
+        ensure_catalog_project(store)
         ns_parts = decode_namespace(namespace)
         ns_name = ns_parts[0] if ns_parts else namespace
         datasets = store.registry.list_saved_datasets(
-            project=prefix,
+            project=CATALOG_PROJECT,
             allow_cache=False,
             tags={CATALOG_MANAGED_TAG: "true", "asset_type": VOLUME_ASSET_TYPE},
+            namespace=prefix,
         )
-        filtered = [ds for ds in datasets if (ds.namespace or DEFAULT_SCHEMA) == ns_name]
+        filtered = [
+            ds for ds in datasets if (ds.collection or DEFAULT_COLLECTION) == ns_name
+        ]
         return ListVolumesResponse(
             volumes=[saved_dataset_to_volume_info(ds, prefix) for ds in filtered]
         )
@@ -65,13 +75,15 @@ def get_volume_router(
     def create_volume(
         prefix: str, namespace: str, request: CreateVolumeRequest
     ) -> VolumeInfo:
-        _ensure_project_exists(prefix)
+        ensure_catalog_project(store)
         ns_parts = decode_namespace(namespace)
         ns_name = ns_parts[0] if ns_parts else namespace
 
+        scoped = make_scoped_name(prefix, ns_name, request.name)
+
         try:
             existing = store.registry.get_saved_dataset(
-                request.name, project=prefix, allow_cache=False, namespace=ns_name
+                scoped, project=CATALOG_PROJECT, allow_cache=False
             )
             if _is_volume(existing):
                 raise VolumeAlreadyExistsException(namespace, request.name)
@@ -81,28 +93,34 @@ def get_volume_router(
         tags = dict(request.properties) if request.properties else {}
         tags[CATALOG_MANAGED_TAG] = "true"
         tags["asset_type"] = VOLUME_ASSET_TYPE
-        tags["volume_type"] = request.volume_type
-        tags["location"] = request.storage_location
+        tags["volume_type"] = request.resolved_type()
+        tags["location"] = request.resolved_location()
+        if request.description:
+            tags["description"] = request.description
         if request.comment:
             tags["comment"] = request.comment
+        if request.connection_ref:
+            tags["connection-ref"] = request.connection_ref
 
         ds = SavedDataset(
-            name=request.name,
+            name=scoped,
             tags=tags,
-            namespace=ns_name,
+            namespace=prefix,
+            collection=ns_name,
             data_source_ref=request.data_source_ref or "",
         )
-        store.registry.apply_saved_dataset(ds, project=prefix, commit=True)
+        store.registry.apply_saved_dataset(ds, project=CATALOG_PROJECT, commit=True)
         return saved_dataset_to_volume_info(ds, prefix)
 
     @router.get("/{prefix}/namespaces/{namespace}/volumes/{volume}")
     def get_volume(prefix: str, namespace: str, volume: str) -> VolumeInfo:
-        _ensure_project_exists(prefix)
+        ensure_catalog_project(store)
         ns_parts = decode_namespace(namespace)
         ns_name = ns_parts[0] if ns_parts else namespace
+        scoped = make_scoped_name(prefix, ns_name, volume)
         try:
             ds = store.registry.get_saved_dataset(
-                volume, project=prefix, allow_cache=True, namespace=ns_name
+                scoped, project=CATALOG_PROJECT, allow_cache=True
             )
         except FeastObjectNotFoundException:
             raise VolumeNotFoundException(namespace, volume)
@@ -124,12 +142,13 @@ def get_volume_router(
 
     @router.head("/{prefix}/namespaces/{namespace}/volumes/{volume}")
     def volume_exists(prefix: str, namespace: str, volume: str) -> Response:
-        _ensure_project_exists(prefix)
+        ensure_catalog_project(store)
         ns_parts = decode_namespace(namespace)
         ns_name = ns_parts[0] if ns_parts else namespace
+        scoped = make_scoped_name(prefix, ns_name, volume)
         try:
             ds = store.registry.get_saved_dataset(
-                volume, project=prefix, allow_cache=True, namespace=ns_name
+                scoped, project=CATALOG_PROJECT, allow_cache=True
             )
         except FeastObjectNotFoundException:
             raise VolumeNotFoundException(namespace, volume)
@@ -137,23 +156,22 @@ def get_volume_router(
             raise VolumeNotFoundException(namespace, volume)
         return Response(status_code=204)
 
-    @router.delete(
-        "/{prefix}/namespaces/{namespace}/volumes/{volume}", status_code=204
-    )
+    @router.delete("/{prefix}/namespaces/{namespace}/volumes/{volume}", status_code=204)
     def delete_volume(prefix: str, namespace: str, volume: str) -> Response:
-        _ensure_project_exists(prefix)
+        ensure_catalog_project(store)
         ns_parts = decode_namespace(namespace)
         ns_name = ns_parts[0] if ns_parts else namespace
+        scoped = make_scoped_name(prefix, ns_name, volume)
         try:
             ds = store.registry.get_saved_dataset(
-                volume, project=prefix, allow_cache=False, namespace=ns_name
+                scoped, project=CATALOG_PROJECT, allow_cache=False
             )
         except FeastObjectNotFoundException:
             raise VolumeNotFoundException(namespace, volume)
         if not _is_volume(ds):
             raise VolumeNotFoundException(namespace, volume)
         store.registry.delete_saved_dataset(
-            volume, project=prefix, commit=True, namespace=ns_name
+            scoped, project=CATALOG_PROJECT, commit=True
         )
         return Response(status_code=204)
 
@@ -161,12 +179,13 @@ def get_volume_router(
     def update_volume(
         prefix: str, namespace: str, volume: str, request: UpdateVolumeRequest
     ) -> VolumeInfo:
-        _ensure_project_exists(prefix)
+        ensure_catalog_project(store)
         ns_parts = decode_namespace(namespace)
         ns_name = ns_parts[0] if ns_parts else namespace
+        scoped = make_scoped_name(prefix, ns_name, volume)
         try:
             ds = store.registry.get_saved_dataset(
-                volume, project=prefix, allow_cache=False, namespace=ns_name
+                scoped, project=CATALOG_PROJECT, allow_cache=False
             )
         except FeastObjectNotFoundException:
             raise VolumeNotFoundException(namespace, volume)
@@ -186,13 +205,16 @@ def get_volume_router(
             data_source_ref = request.data_source_ref
 
         updated = SavedDataset(
-            name=ds.name,
+            name=scoped,
             tags=tags,
-            namespace=ns_name,
+            namespace=prefix,
+            collection=ns_name,
             data_source_ref=data_source_ref,
         )
         updated.created_timestamp = ds.created_timestamp
-        store.registry.apply_saved_dataset(updated, project=prefix, commit=True)
+        store.registry.apply_saved_dataset(
+            updated, project=CATALOG_PROJECT, commit=True
+        )
         return saved_dataset_to_volume_info(updated, prefix)
 
     return router

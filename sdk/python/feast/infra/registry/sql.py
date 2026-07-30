@@ -962,9 +962,9 @@ class SqlRegistry(CachingRegistry):
         )
 
     def _list_saved_datasets(
-        self, project: str, tags: Optional[dict[str, str]] = None, **kwargs
+        self, project: str, tags: Optional[dict[str, str]] = None, collection: str = "", **kwargs
     ) -> List[SavedDataset]:
-        return self._list_objects(
+        results = self._list_objects(
             saved_datasets,
             project,
             SavedDatasetProto,
@@ -973,6 +973,9 @@ class SqlRegistry(CachingRegistry):
             tags=tags,
             **kwargs,
         )
+        if collection:
+            results = [ds for ds in results if ds.collection == collection]
+        return results
 
     def _list_on_demand_feature_views(
         self, project: str, tags: Optional[dict[str, str]], **kwargs

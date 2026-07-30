@@ -21,7 +21,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 
 logger = logging.getLogger(__name__)
 
-API_GROUP = "datacatalog.opendatahub.io"
+API_GROUP = "dataregistry.opendatahub.io"
 
 SSAR_CACHE_TTL = int(os.environ.get("SSAR_CACHE_TTL", "30"))
 SSAR_CACHE_MAX_SIZE = int(os.environ.get("SSAR_CACHE_MAX_SIZE", "10000"))
@@ -49,7 +49,7 @@ RESOURCE_CONTEXT_PATTERN = re.compile(
 )
 
 
-_RESERVED_TOP_ROUTES = {"search", "config"}
+_RESERVED_TOP_ROUTES = {"search", "config", "projects"}
 
 
 def _extract_prefix(path: str) -> Optional[str]:
@@ -83,6 +83,8 @@ def _map_to_resource(path: str) -> str:
     for i, part in enumerate(parts):
         if part in ("tables", "volumes"):
             return part
+        if part == "generic-tables":
+            return "tables"
     if "search" in parts:
         return "tables"
     return "namespaces"
@@ -108,7 +110,7 @@ def _map_to_verb(method: str, path: str) -> str:
         if resource in ("tables", "volumes"):
             resource_idx = None
             for i, p in enumerate(parts):
-                if p == resource:
+                if p == resource or (resource == "tables" and p == "generic-tables"):
                     resource_idx = i
                     break
             if resource_idx is not None and resource_idx + 1 < len(parts):
@@ -127,9 +129,8 @@ def _map_to_verb(method: str, path: str) -> str:
     if method == "POST":
         resource = _map_to_resource(path)
         if resource in ("tables", "volumes"):
-            resource_key = resource
             for i, p in enumerate(parts):
-                if p == resource_key:
+                if p == resource or (resource == "tables" and p == "generic-tables"):
                     if i + 1 < len(parts) and parts[i + 1] != "rename":
                         return "update"
                     break
