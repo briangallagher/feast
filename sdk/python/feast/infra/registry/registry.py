@@ -1295,12 +1295,13 @@ class Registry(BaseRegistry):
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
         namespace: str = "",
+        collection: str = "",
     ) -> List[SavedDataset]:
         registry_proto = self._get_registry_proto(
             project=project, allow_cache=allow_cache
         )
         return proto_registry_utils.list_saved_datasets(
-            registry_proto, project, tags, namespace=namespace
+            registry_proto, project, tags, namespace=namespace, collection=collection
         )
 
     def delete_saved_dataset(

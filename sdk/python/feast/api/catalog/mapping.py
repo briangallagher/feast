@@ -1,5 +1,6 @@
+import logging
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from feast.api.catalog.models import (
     IcebergField,
@@ -9,12 +10,81 @@ from feast.api.catalog.models import (
     TableMetadata,
     VolumeInfo,
 )
+from feast.errors import FeastObjectNotFoundException
 from feast.project import Project
 from feast.saved_dataset import SavedDataset
+
+logger = logging.getLogger(__name__)
 
 CATALOG_UUID_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
 CATALOG_MANAGED_TAG = "_catalog_managed"
+CATALOG_PROJECT = "data-registry"
+DEFAULT_COLLECTION = "default"
+SCOPED_NAME_SEP = "/"
+
+
+def make_scoped_name(rhai_ns: str, collection: str, display_name: str) -> str:
+    return f"{rhai_ns}{SCOPED_NAME_SEP}{collection}{SCOPED_NAME_SEP}{display_name}"
+
+
+def parse_display_name(scoped_name: str) -> str:
+    parts = scoped_name.split(SCOPED_NAME_SEP)
+    return parts[-1] if len(parts) >= 3 else scoped_name
+
+
+def ensure_catalog_project(store) -> None:
+    try:
+        store.registry.get_project(CATALOG_PROJECT, allow_cache=True)
+    except FeastObjectNotFoundException:
+        project = Project(name=CATALOG_PROJECT, description="RHAI Data Registry")
+        store.registry.apply_project(project, commit=True)
+        logger.info("Created catalog project: %s", CATALOG_PROJECT)
+
+
+def list_rhai_namespaces(store) -> Set[str]:
+    datasets = store.registry.list_saved_datasets(
+        project=CATALOG_PROJECT, allow_cache=True,
+        tags={CATALOG_MANAGED_TAG: "true"},
+    )
+    namespaces: Set[str] = set()
+    for ds in datasets:
+        if ds.namespace:
+            namespaces.add(ds.namespace)
+    try:
+        project = store.registry.get_project(CATALOG_PROJECT, allow_cache=True)
+        if project.tags:
+            for key in project.tags:
+                if key.startswith("_ns_"):
+                    parts = key[4:].split("_", 1)
+                    if parts[0]:
+                        namespaces.add(parts[0])
+    except FeastObjectNotFoundException:
+        pass
+    return namespaces
+
+
+def list_collections_for_ns(store, rhai_ns: str) -> Set[str]:
+    datasets = store.registry.list_saved_datasets(
+        project=CATALOG_PROJECT, allow_cache=True,
+        tags={CATALOG_MANAGED_TAG: "true"},
+        namespace=rhai_ns,
+    )
+    collections: Set[str] = set()
+    for ds in datasets:
+        collections.add(ds.collection or DEFAULT_COLLECTION)
+    try:
+        project = store.registry.get_project(CATALOG_PROJECT, allow_cache=True)
+        if project.tags:
+            prefix = f"_ns_{rhai_ns}_"
+            for key in project.tags:
+                if key.startswith(prefix):
+                    coll = key[len(prefix):]
+                    if coll:
+                        collections.add(coll)
+    except FeastObjectNotFoundException:
+        pass
+    return collections
 
 
 def _make_uuid(namespace: str, name: str) -> str:
@@ -95,7 +165,8 @@ def namespace_properties_to_project_kwargs(
 def saved_dataset_to_load_table_response(
     ds: SavedDataset, namespace: str
 ) -> LoadTableResponse:
-    location = ds.tags.get("location", f"feast://{namespace}/tables/{ds.name}")
+    display_name = parse_display_name(ds.name)
+    location = ds.tags.get("location", f"feast://{namespace}/tables/{display_name}")
     schema = _columns_to_iceberg_schema(ds.columns)
 
     properties: Dict[str, str] = {
@@ -108,7 +179,7 @@ def saved_dataset_to_load_table_response(
 
     metadata = TableMetadata(  # type: ignore[call-arg]
         format_version=2,
-        table_uuid=_make_uuid(namespace, ds.name),
+        table_uuid=_make_uuid(namespace, display_name),
         location=location,
         last_updated_ms=last_updated,
         properties=properties,
@@ -119,7 +190,7 @@ def saved_dataset_to_load_table_response(
     )
 
     return LoadTableResponse(  # type: ignore[call-arg]
-        metadata_location=f"feast://{namespace}/tables/{ds.name}/metadata",
+        metadata_location=f"feast://{namespace}/tables/{display_name}/metadata",
         metadata=metadata,
     )
 
@@ -128,6 +199,7 @@ def saved_dataset_to_load_table_response(
 
 
 def saved_dataset_to_volume_info(ds: SavedDataset, namespace: str) -> VolumeInfo:
+    display_name = parse_display_name(ds.name)
     tags = {
         k: v
         for k, v in ds.tags.items()
@@ -135,10 +207,10 @@ def saved_dataset_to_volume_info(ds: SavedDataset, namespace: str) -> VolumeInfo
     }
     volume_type = ds.tags.get("volume_type", "EXTERNAL")
     comment: Optional[str] = ds.tags.get("comment")
-    location = ds.tags.get("location", f"feast://{namespace}/volumes/{ds.name}")
+    location = ds.tags.get("location", f"feast://{namespace}/volumes/{display_name}")
 
     return VolumeInfo(  # type: ignore[call-arg]
-        name=ds.name,
+        name=display_name,
         catalog_name=namespace,
         schema_name=ds.namespace or "default",
         volume_type=volume_type,

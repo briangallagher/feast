@@ -87,6 +87,7 @@ class SavedDataset:
     tags: Dict[str, str]
     feature_service_name: Optional[str] = None
     namespace: str = ""
+    collection: str = ""
     data_source_ref: str = ""
     columns: List[Dict[str, Any]] = []
 
@@ -108,6 +109,7 @@ class SavedDataset:
         tags: Optional[Dict[str, str]] = None,
         feature_service_name: Optional[str] = None,
         namespace: str = "",
+        collection: str = "",
         data_source_ref: str = "",
         columns: Optional[List[Dict[str, Any]]] = None,
     ):
@@ -119,6 +121,7 @@ class SavedDataset:
         self.tags = tags or {}
         self.feature_service_name = feature_service_name
         self.namespace = namespace
+        self.collection = collection
         self.data_source_ref = data_source_ref
         self.columns = columns or []
 
@@ -173,6 +176,7 @@ class SavedDataset:
             storage=storage,
             tags=dict(saved_dataset_proto.spec.tags.items()),
             namespace=saved_dataset_proto.spec.namespace,
+            collection=saved_dataset_proto.spec.collection,
             data_source_ref=saved_dataset_proto.spec.data_source_ref,
             columns=[
                 {"name": c.name, "type": c.type, "nullable": c.nullable}
@@ -224,6 +228,7 @@ class SavedDataset:
             full_feature_names=self.full_feature_names,
             tags=self.tags,
             namespace=self.namespace,
+            collection=self.collection,
             data_source_ref=self.data_source_ref,
             columns=[
                 ColumnSchemaProto(

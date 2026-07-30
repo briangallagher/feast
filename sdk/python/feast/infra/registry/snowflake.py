@@ -924,11 +924,13 @@ class SnowflakeRegistry(BaseRegistry):
         project: str,
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
+        namespace: str = "",
+        collection: str = "",
     ) -> List[SavedDataset]:
         if allow_cache:
             registry_proto = self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.list_saved_datasets(
-                registry_proto, project, tags
+                registry_proto, project, tags, namespace=namespace, collection=collection
             )
         return self._list_objects(
             "SAVED_DATASETS",

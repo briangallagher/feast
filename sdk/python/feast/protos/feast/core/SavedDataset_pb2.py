@@ -26,7 +26,7 @@ from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__
 from feast.protos.feast.core import DataSource_pb2 as feast_dot_core_dot_DataSource__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1d\x66\x65\x61st/core/SavedDataset.proto\x12\nfeast.core\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1b\x66\x65\x61st/core/DataSource.proto\"\xfc\x02\n\x10SavedDatasetSpec\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0f\n\x07project\x18\x02 \x01(\t\x12\x10\n\x08\x66\x65\x61tures\x18\x03 \x03(\t\x12\x11\n\tjoin_keys\x18\x04 \x03(\t\x12\x1a\n\x12\x66ull_feature_names\x18\x05 \x01(\x08\x12\x30\n\x07storage\x18\x06 \x01(\x0b\x32\x1f.feast.core.SavedDatasetStorage\x12\x1c\n\x14\x66\x65\x61ture_service_name\x18\x08 \x01(\t\x12\x34\n\x04tags\x18\x07 \x03(\x0b\x32&.feast.core.SavedDatasetSpec.TagsEntry\x12\x11\n\tnamespace\x18\t \x01(\t\x12\x17\n\x0f\x64\x61ta_source_ref\x18\n \x01(\t\x12)\n\x07\x63olumns\x18\x0b \x03(\x0b\x32\x18.feast.core.ColumnSchema\x1a+\n\tTagsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"<\n\x0c\x43olumnSchema\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0c\n\x04type\x18\x02 \x01(\t\x12\x10\n\x08nullable\x18\x03 \x01(\x08\"\xa9\x04\n\x13SavedDatasetStorage\x12:\n\x0c\x66ile_storage\x18\x04 \x01(\x0b\x32\".feast.core.DataSource.FileOptionsH\x00\x12\x42\n\x10\x62igquery_storage\x18\x05 \x01(\x0b\x32&.feast.core.DataSource.BigQueryOptionsH\x00\x12\x42\n\x10redshift_storage\x18\x06 \x01(\x0b\x32&.feast.core.DataSource.RedshiftOptionsH\x00\x12\x44\n\x11snowflake_storage\x18\x07 \x01(\x0b\x32\'.feast.core.DataSource.SnowflakeOptionsH\x00\x12<\n\rtrino_storage\x18\x08 \x01(\x0b\x32#.feast.core.DataSource.TrinoOptionsH\x00\x12<\n\rspark_storage\x18\t \x01(\x0b\x32#.feast.core.DataSource.SparkOptionsH\x00\x12\x44\n\x0e\x63ustom_storage\x18\n \x01(\x0b\x32*.feast.core.DataSource.CustomSourceOptionsH\x00\x12>\n\x0e\x61thena_storage\x18\x0b \x01(\x0b\x32$.feast.core.DataSource.AthenaOptionsH\x00\x42\x06\n\x04kind\"\xf7\x01\n\x10SavedDatasetMeta\x12\x35\n\x11\x63reated_timestamp\x18\x01 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12:\n\x16last_updated_timestamp\x18\x02 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x37\n\x13min_event_timestamp\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x37\n\x13max_event_timestamp\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"f\n\x0cSavedDataset\x12*\n\x04spec\x18\x01 \x01(\x0b\x32\x1c.feast.core.SavedDatasetSpec\x12*\n\x04meta\x18\x02 \x01(\x0b\x32\x1c.feast.core.SavedDatasetMetaBV\n\x10\x66\x65\x61st.proto.coreB\x11SavedDatasetProtoZ/github.com/feast-dev/feast/go/protos/feast/coreb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1d\x66\x65\x61st/core/SavedDataset.proto\x12\nfeast.core\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1b\x66\x65\x61st/core/DataSource.proto\"\x90\x03\n\x10SavedDatasetSpec\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0f\n\x07project\x18\x02 \x01(\t\x12\x10\n\x08\x66\x65\x61tures\x18\x03 \x03(\t\x12\x11\n\tjoin_keys\x18\x04 \x03(\t\x12\x1a\n\x12\x66ull_feature_names\x18\x05 \x01(\x08\x12\x30\n\x07storage\x18\x06 \x01(\x0b\x32\x1f.feast.core.SavedDatasetStorage\x12\x1c\n\x14\x66\x65\x61ture_service_name\x18\x08 \x01(\t\x12\x34\n\x04tags\x18\x07 \x03(\x0b\x32&.feast.core.SavedDatasetSpec.TagsEntry\x12\x11\n\tnamespace\x18\t \x01(\t\x12\x17\n\x0f\x64\x61ta_source_ref\x18\n \x01(\t\x12)\n\x07\x63olumns\x18\x0b \x03(\x0b\x32\x18.feast.core.ColumnSchema\x12\x12\n\ncollection\x18\x0c \x01(\t\x1a+\n\tTagsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"<\n\x0c\x43olumnSchema\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0c\n\x04type\x18\x02 \x01(\t\x12\x10\n\x08nullable\x18\x03 \x01(\x08\"\xa9\x04\n\x13SavedDatasetStorage\x12:\n\x0c\x66ile_storage\x18\x04 \x01(\x0b\x32\".feast.core.DataSource.FileOptionsH\x00\x12\x42\n\x10\x62igquery_storage\x18\x05 \x01(\x0b\x32&.feast.core.DataSource.BigQueryOptionsH\x00\x12\x42\n\x10redshift_storage\x18\x06 \x01(\x0b\x32&.feast.core.DataSource.RedshiftOptionsH\x00\x12\x44\n\x11snowflake_storage\x18\x07 \x01(\x0b\x32\'.feast.core.DataSource.SnowflakeOptionsH\x00\x12<\n\rtrino_storage\x18\x08 \x01(\x0b\x32#.feast.core.DataSource.TrinoOptionsH\x00\x12<\n\rspark_storage\x18\t \x01(\x0b\x32#.feast.core.DataSource.SparkOptionsH\x00\x12\x44\n\x0e\x63ustom_storage\x18\n \x01(\x0b\x32*.feast.core.DataSource.CustomSourceOptionsH\x00\x12>\n\x0e\x61thena_storage\x18\x0b \x01(\x0b\x32$.feast.core.DataSource.AthenaOptionsH\x00\x42\x06\n\x04kind\"\xf7\x01\n\x10SavedDatasetMeta\x12\x35\n\x11\x63reated_timestamp\x18\x01 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12:\n\x16last_updated_timestamp\x18\x02 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x37\n\x13min_event_timestamp\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x37\n\x13max_event_timestamp\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"f\n\x0cSavedDataset\x12*\n\x04spec\x18\x01 \x01(\x0b\x32\x1c.feast.core.SavedDatasetSpec\x12*\n\x04meta\x18\x02 \x01(\x0b\x32\x1c.feast.core.SavedDatasetMetaBV\n\x10\x66\x65\x61st.proto.coreB\x11SavedDatasetProtoZ/github.com/feast-dev/feast/go/protos/feast/coreb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -37,15 +37,15 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_SAVEDDATASETSPEC_TAGSENTRY']._loaded_options = None
   _globals['_SAVEDDATASETSPEC_TAGSENTRY']._serialized_options = b'8\001'
   _globals['_SAVEDDATASETSPEC']._serialized_start=108
-  _globals['_SAVEDDATASETSPEC']._serialized_end=488
-  _globals['_SAVEDDATASETSPEC_TAGSENTRY']._serialized_start=445
-  _globals['_SAVEDDATASETSPEC_TAGSENTRY']._serialized_end=488
-  _globals['_COLUMNSCHEMA']._serialized_start=490
-  _globals['_COLUMNSCHEMA']._serialized_end=550
-  _globals['_SAVEDDATASETSTORAGE']._serialized_start=553
-  _globals['_SAVEDDATASETSTORAGE']._serialized_end=1106
-  _globals['_SAVEDDATASETMETA']._serialized_start=1109
-  _globals['_SAVEDDATASETMETA']._serialized_end=1356
-  _globals['_SAVEDDATASET']._serialized_start=1358
-  _globals['_SAVEDDATASET']._serialized_end=1460
+  _globals['_SAVEDDATASETSPEC']._serialized_end=508
+  _globals['_SAVEDDATASETSPEC_TAGSENTRY']._serialized_start=465
+  _globals['_SAVEDDATASETSPEC_TAGSENTRY']._serialized_end=508
+  _globals['_COLUMNSCHEMA']._serialized_start=510
+  _globals['_COLUMNSCHEMA']._serialized_end=570
+  _globals['_SAVEDDATASETSTORAGE']._serialized_start=573
+  _globals['_SAVEDDATASETSTORAGE']._serialized_end=1126
+  _globals['_SAVEDDATASETMETA']._serialized_start=1129
+  _globals['_SAVEDDATASETMETA']._serialized_end=1376
+  _globals['_SAVEDDATASET']._serialized_start=1378
+  _globals['_SAVEDDATASET']._serialized_end=1480
 # @@protoc_insertion_point(module_scope)

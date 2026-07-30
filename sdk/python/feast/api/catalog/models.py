@@ -179,13 +179,23 @@ class VolumeInfo(BaseModel):
 
 class CreateVolumeRequest(BaseModel):
     name: str
-    volume_type: str = Field(alias="volume-type")
-    storage_location: str = Field(alias="storage-location")
+    location: Optional[str] = None
+    storage_location: Optional[str] = Field(default=None, alias="storage-location")
+    volume_type: Optional[str] = Field(default=None, alias="volume-type")
+    content_type: Optional[str] = None
+    connection_ref: Optional[str] = None
     comment: Optional[str] = None
+    description: Optional[str] = None
     data_source_ref: Optional[str] = None
     properties: Optional[Dict[str, str]] = None
 
     model_config = {"populate_by_name": True}
+
+    def resolved_location(self) -> str:
+        return self.location or self.storage_location or ""
+
+    def resolved_type(self) -> str:
+        return self.volume_type or self.content_type or "unknown"
 
 
 class UpdateVolumeRequest(BaseModel):

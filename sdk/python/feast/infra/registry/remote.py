@@ -513,9 +513,10 @@ class RemoteRegistry(BaseRegistry):
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
         namespace: str = "",
+        collection: str = "",
     ) -> List[SavedDataset]:
         request = RegistryServer_pb2.ListSavedDatasetsRequest(
-            project=project, allow_cache=allow_cache, tags=tags, namespace=namespace
+            project=project, allow_cache=allow_cache, tags=tags, namespace=namespace, collection=collection
         )
         response = self.stub.ListSavedDatasets(request)
         return [

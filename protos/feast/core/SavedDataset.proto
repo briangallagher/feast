@@ -57,6 +57,9 @@ message SavedDatasetSpec {
 
   // Typed column definitions for Iceberg schema.
   repeated ColumnSchema columns = 11;
+
+  // Sub-grouping within a namespace. Maps to Iceberg namespace level 3 (collection).
+  string collection = 12;
 }
 
 message ColumnSchema {
