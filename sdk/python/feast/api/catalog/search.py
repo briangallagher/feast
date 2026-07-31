@@ -26,7 +26,6 @@ from fastapi import APIRouter, Query
 
 from feast import FeatureStore
 from feast.api.catalog.mapping import (
-    CATALOG_MANAGED_TAG,
     CATALOG_PROJECT,
     DEFAULT_COLLECTION,
     list_collections_for_ns,
@@ -60,8 +59,6 @@ def _compute_match_score(query: str, name: str, description: str, tags: dict) ->
         return 80
 
     for key, val in tags.items():
-        if key == CATALOG_MANAGED_TAG:
-            continue
         if q in str(val).lower() or q in key.lower():
             return 60
 
@@ -92,8 +89,6 @@ def _matches_property_filters(tags: dict, filters: List[str]) -> bool:
         key, value = f.split(":", 1)
         matched = False
         for tag_key, tag_val in tags.items():
-            if tag_key == CATALOG_MANAGED_TAG:
-                continue
             if key.lower() in tag_key.lower() and value.lower() in str(tag_val).lower():
                 matched = True
                 break
@@ -193,7 +188,6 @@ def _search_rhai_namespace(
             datasets = store.registry.list_saved_datasets(
                 project=CATALOG_PROJECT,
                 allow_cache=False,
-                tags={CATALOG_MANAGED_TAG: "true"},
                 namespace=rhai_ns,
             )
 
@@ -225,7 +219,7 @@ def _search_rhai_namespace(
             props = {
                 k: v
                 for k, v in ds.tags.items()
-                if k not in (CATALOG_MANAGED_TAG, "asset_type")
+                if k not in ("asset_type",)
             }
 
             scored_results.append(

@@ -962,7 +962,7 @@ class SqlRegistry(CachingRegistry):
         )
 
     def _list_saved_datasets(
-        self, project: str, tags: Optional[dict[str, str]] = None, collection: str = "", **kwargs
+        self, project: str, tags: Optional[dict[str, str]] = None, namespace: str = "", collection: str = "", **kwargs
     ) -> List[SavedDataset]:
         results = self._list_objects(
             saved_datasets,
@@ -973,6 +973,8 @@ class SqlRegistry(CachingRegistry):
             tags=tags,
             **kwargs,
         )
+        if namespace:
+            results = [ds for ds in results if ds.namespace == namespace]
         if collection:
             results = [ds for ds in results if ds.collection == collection]
         return results

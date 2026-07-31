@@ -9,7 +9,6 @@ from feast.api.catalog.errors import (
     NamespaceNotFoundException,
 )
 from feast.api.catalog.mapping import (
-    CATALOG_MANAGED_TAG,
     CATALOG_PROJECT,
     DEFAULT_COLLECTION,
     ensure_catalog_project,
@@ -50,7 +49,8 @@ def get_namespace_router(store: FeatureStore) -> APIRouter:
     def list_namespaces(prefix: str) -> ListNamespacesResponse:
         ensure_catalog_project(store)
         collections = list_collections_for_ns(store, prefix)
-        collections.add(DEFAULT_COLLECTION)
+        if not collections:
+            collections.add(DEFAULT_COLLECTION)
         return ListNamespacesResponse(
             namespaces=[decode_namespace(ns) for ns in sorted(collections)]
         )
@@ -104,7 +104,6 @@ def get_namespace_router(store: FeatureStore) -> APIRouter:
         catalog_datasets = store.registry.list_saved_datasets(
             project=CATALOG_PROJECT,
             allow_cache=False,
-            tags={CATALOG_MANAGED_TAG: "true"},
             namespace=prefix,
         )
         ns_datasets = [

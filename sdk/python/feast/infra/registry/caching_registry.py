@@ -347,7 +347,7 @@ class CachingRegistry(BaseRegistry):
             return proto_registry_utils.list_saved_datasets(
                 self.cached_registry_proto, project, tags, namespace=namespace, collection=collection
             )
-        return self._list_saved_datasets(project, tags, collection=collection)
+        return self._list_saved_datasets(project, tags, namespace=namespace, collection=collection)
 
     @abstractmethod
     def _get_validation_reference(self, name: str, project: str) -> ValidationReference:
