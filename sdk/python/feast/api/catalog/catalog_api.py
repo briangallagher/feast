@@ -20,7 +20,6 @@ from pydantic import BaseModel, Field
 
 from feast import FeatureStore
 from feast.api.catalog.mapping import (
-    CATALOG_MANAGED_TAG,
     CATALOG_PROJECT,
     DEFAULT_COLLECTION,
     ensure_catalog_project,
@@ -55,7 +54,6 @@ SUPPORTED_DB_TYPES = [
 ]
 
 SYSTEM_TAGS = {
-    "_catalog_managed",
     "asset_type",
     "format",
     "location",
@@ -86,6 +84,11 @@ class CreateTableRequest(BaseModel):
     location: Optional[str] = None
     connection_ref: Optional[str] = None
     description: Optional[str] = None
+    purpose: Optional[str] = None
+    license: Optional[str] = None
+    maturity: Optional[str] = None
+    domain: Optional[str] = None
+    pii: Optional[str] = None
     schema_fields: Optional[List[Dict[str, Any]]] = Field(
         default=None,
         description="Column definitions: [{name, type, nullable, description, min, max, ...}]",
@@ -304,7 +307,6 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
         datasets = store.registry.list_saved_datasets(
             project=CATALOG_PROJECT,
             allow_cache=False,
-            tags={CATALOG_MANAGED_TAG: "true"},
             namespace=project,
         )
         ns_datasets = [
@@ -340,7 +342,7 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
         datasets = store.registry.list_saved_datasets(
             project=CATALOG_PROJECT,
             allow_cache=False,
-            tags={CATALOG_MANAGED_TAG: "true", "asset_type": TABLE_ASSET_TYPE},
+            tags={"asset_type": TABLE_ASSET_TYPE},
             namespace=project,
         )
         filtered = [
@@ -367,7 +369,7 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
             pass
 
         location = (
-            request.location or f"feast://{project}/{collection}/tables/{request.name}"
+            request.location or ""
         )
 
         columns: list[dict] = []
@@ -385,7 +387,6 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
             ]
 
         tags: Dict[str, str] = {
-            CATALOG_MANAGED_TAG: "true",
             "asset_type": TABLE_ASSET_TYPE,
             "format": request.format,
             "location": location,
@@ -417,8 +418,6 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
             )
         except FeastObjectNotFoundException:
             raise _not_found(f"Table not found: {collection}.{table}")
-        if ds.tags.get(CATALOG_MANAGED_TAG) != "true":
-            raise _not_found(f"Table not found: {collection}.{table}")
         if ds.tags.get("asset_type") != TABLE_ASSET_TYPE:
             raise _not_found(f"Table not found: {collection}.{table}")
         return _saved_dataset_to_asset(ds)
@@ -435,8 +434,6 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
                 scoped, project=CATALOG_PROJECT, allow_cache=False
             )
         except FeastObjectNotFoundException:
-            raise _not_found(f"Table not found: {collection}.{table}")
-        if ds.tags.get(CATALOG_MANAGED_TAG) != "true":
             raise _not_found(f"Table not found: {collection}.{table}")
         if ds.tags.get("asset_type") != TABLE_ASSET_TYPE:
             raise _not_found(f"Table not found: {collection}.{table}")
@@ -455,7 +452,7 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
         datasets = store.registry.list_saved_datasets(
             project=CATALOG_PROJECT,
             allow_cache=False,
-            tags={CATALOG_MANAGED_TAG: "true", "asset_type": VOLUME_ASSET_TYPE},
+            tags={"asset_type": VOLUME_ASSET_TYPE},
             namespace=project,
         )
         filtered = [
@@ -484,7 +481,6 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
             pass
 
         tags: Dict[str, str] = {
-            CATALOG_MANAGED_TAG: "true",
             "asset_type": VOLUME_ASSET_TYPE,
             "location": request.location,
             "content_type": request.content_type or "",
@@ -515,8 +511,6 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
             )
         except FeastObjectNotFoundException:
             raise _not_found(f"Volume not found: {collection}.{volume}")
-        if ds.tags.get(CATALOG_MANAGED_TAG) != "true":
-            raise _not_found(f"Volume not found: {collection}.{volume}")
         if ds.tags.get("asset_type") != VOLUME_ASSET_TYPE:
             raise _not_found(f"Volume not found: {collection}.{volume}")
         return _saved_dataset_to_asset(ds)
@@ -533,8 +527,6 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
                 scoped, project=CATALOG_PROJECT, allow_cache=False
             )
         except FeastObjectNotFoundException:
-            raise _not_found(f"Volume not found: {collection}.{volume}")
-        if ds.tags.get(CATALOG_MANAGED_TAG) != "true":
             raise _not_found(f"Volume not found: {collection}.{volume}")
         if ds.tags.get("asset_type") != VOLUME_ASSET_TYPE:
             raise _not_found(f"Volume not found: {collection}.{volume}")
@@ -553,7 +545,7 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
         datasets = store.registry.list_saved_datasets(
             project=CATALOG_PROJECT,
             allow_cache=False,
-            tags={CATALOG_MANAGED_TAG: "true", "asset_type": DATABASE_ASSET_TYPE},
+            tags={"asset_type": DATABASE_ASSET_TYPE},
             namespace=project,
         )
         filtered = [
@@ -589,7 +581,6 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
             pass
 
         tags: Dict[str, str] = {
-            CATALOG_MANAGED_TAG: "true",
             "asset_type": DATABASE_ASSET_TYPE,
             "db_type": request.db_type,
             "host": request.host,
@@ -622,8 +613,6 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
             )
         except FeastObjectNotFoundException:
             raise _not_found(f"Database not found: {collection}.{database}")
-        if ds.tags.get(CATALOG_MANAGED_TAG) != "true":
-            raise _not_found(f"Database not found: {collection}.{database}")
         if ds.tags.get("asset_type") != DATABASE_ASSET_TYPE:
             raise _not_found(f"Database not found: {collection}.{database}")
         return _saved_dataset_to_asset(ds)
@@ -640,8 +629,6 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
                 scoped, project=CATALOG_PROJECT, allow_cache=False
             )
         except FeastObjectNotFoundException:
-            raise _not_found(f"Database not found: {collection}.{database}")
-        if ds.tags.get(CATALOG_MANAGED_TAG) != "true":
             raise _not_found(f"Database not found: {collection}.{database}")
         if ds.tags.get("asset_type") != DATABASE_ASSET_TYPE:
             raise _not_found(f"Database not found: {collection}.{database}")
@@ -672,14 +659,14 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
     ) -> AssetListResponse:
         ensure_catalog_project(store)
 
-        tag_filter: Dict[str, str] = {CATALOG_MANAGED_TAG: "true"}
+        tag_filter: Dict[str, str] = {}
         if asset_type:
             tag_filter["asset_type"] = asset_type
 
         datasets = store.registry.list_saved_datasets(
             project=CATALOG_PROJECT,
             allow_cache=False,
-            tags=tag_filter,
+            tags=tag_filter if tag_filter else None,
             namespace=project,
         )
 
@@ -697,7 +684,6 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
                 tag_match = any(
                     query_lower in v.lower()
                     for k, v in ds.tags.items()
-                    if k != CATALOG_MANAGED_TAG
                 )
                 if not (name_match or desc_match or tag_match):
                     continue
@@ -732,7 +718,7 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
         query_lower = q.lower()
 
         for ns_name in ns_names:
-            tag_filter: Dict[str, str] = {CATALOG_MANAGED_TAG: "true"}
+            tag_filter: Dict[str, str] = {}
             if asset_type:
                 tag_filter["asset_type"] = asset_type
 
@@ -740,7 +726,7 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
                 datasets = store.registry.list_saved_datasets(
                     project=CATALOG_PROJECT,
                     allow_cache=False,
-                    tags=tag_filter,
+                    tags=tag_filter if tag_filter else None,
                     namespace=ns_name,
                 )
             except Exception:
@@ -756,7 +742,6 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
                     tag_match = any(
                         query_lower in v.lower()
                         for k, v in ds.tags.items()
-                        if k != CATALOG_MANAGED_TAG
                     )
                     if not (name_match or desc_match or tag_match):
                         continue
@@ -786,7 +771,7 @@ def get_generic_tables_router(store: FeatureStore) -> APIRouter:
         datasets = store.registry.list_saved_datasets(
             project=CATALOG_PROJECT,
             allow_cache=False,
-            tags={CATALOG_MANAGED_TAG: "true", "asset_type": TABLE_ASSET_TYPE},
+            tags={"asset_type": TABLE_ASSET_TYPE},
             namespace=rhai_ns,
             collection=collection,
         )
@@ -812,7 +797,7 @@ def get_generic_tables_router(store: FeatureStore) -> APIRouter:
         except FeastObjectNotFoundException:
             pass
 
-        location = body.location or f"feast://{rhai_ns}/{collection}/tables/{body.name}"
+        location = body.location or ""
 
         columns = []
         if body.schema_fields:
@@ -832,7 +817,6 @@ def get_generic_tables_router(store: FeatureStore) -> APIRouter:
             if extras: col_meta[col["name"]] = extras
 
         tags = {
-            CATALOG_MANAGED_TAG: "true",
             "asset_type": TABLE_ASSET_TYPE,
             "format": body.format,
             "location": location,
@@ -840,6 +824,16 @@ def get_generic_tables_router(store: FeatureStore) -> APIRouter:
             "description": body.description or "",
             "registered_by": request.headers.get("X-User") or request.headers.get("kubeflow-userid", "unknown"),
         }
+        if body.purpose:
+            tags["purpose"] = body.purpose
+        if body.license:
+            tags["license"] = body.license
+        if body.maturity:
+            tags["maturity"] = body.maturity
+        if body.domain:
+            tags["domain"] = body.domain
+        if body.pii:
+            tags["pii"] = body.pii
         if col_meta:
             tags["_col_meta"] = json.dumps(col_meta)
         if body.properties:
@@ -866,7 +860,7 @@ def get_generic_tables_router(store: FeatureStore) -> APIRouter:
             )
         except FeastObjectNotFoundException:
             raise _not_found(f"Table not found: {namespace}.{table}")
-        if ds.tags.get(CATALOG_MANAGED_TAG) != "true" or ds.tags.get("asset_type") != TABLE_ASSET_TYPE:
+        if ds.tags.get("asset_type") != TABLE_ASSET_TYPE:
             raise _not_found(f"Table not found: {namespace}.{table}")
         if (ds.collection or DEFAULT_COLLECTION) != collection:
             raise _not_found(f"Table not found: {namespace}.{table}")
@@ -884,7 +878,7 @@ def get_generic_tables_router(store: FeatureStore) -> APIRouter:
             )
         except FeastObjectNotFoundException:
             raise _not_found(f"Table not found: {namespace}.{table}")
-        if ds.tags.get(CATALOG_MANAGED_TAG) != "true" or ds.tags.get("asset_type") != TABLE_ASSET_TYPE:
+        if ds.tags.get("asset_type") != TABLE_ASSET_TYPE:
             raise _not_found(f"Table not found: {namespace}.{table}")
         if (ds.collection or DEFAULT_COLLECTION) != collection:
             raise _not_found(f"Table not found: {namespace}.{table}")

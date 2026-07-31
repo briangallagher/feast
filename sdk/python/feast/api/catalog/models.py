@@ -169,8 +169,8 @@ class VolumeInfo(BaseModel):
     storage_location: str = Field(alias="storage-location")
     comment: Optional[str] = None
     owner: Optional[str] = None
-    created_at: Optional[int] = Field(default=None, alias="created-at")
-    updated_at: Optional[int] = Field(default=None, alias="updated-at")
+    created_at: Optional[str] = Field(default=None, alias="created-at")
+    updated_at: Optional[str] = Field(default=None, alias="updated-at")
     properties: Dict[str, str] = {}
     config: Dict[str, str] = {}
 

@@ -5,7 +5,6 @@ from fastapi import FastAPI, Query, Request
 
 from feast import FeatureStore
 from feast.api.catalog.catalog_api import get_generic_tables_router
-from feast.api.catalog.credentials import create_vender_from_env
 from feast.api.catalog.errors import register_iceberg_exception_handlers
 from feast.api.catalog.mapping import ensure_catalog_project, list_rhai_namespaces
 from feast.api.catalog.metadata_reader import create_reader_from_env
@@ -49,7 +48,6 @@ CATALOG_ENDPOINTS = [
 def add_catalog_routes(app: FastAPI, store: FeatureStore) -> None:
     register_iceberg_exception_handlers(app)
 
-    credential_vender = create_vender_from_env()
     metadata_reader = create_reader_from_env()
 
     prefix = "/v1"
@@ -81,15 +79,11 @@ def add_catalog_routes(app: FastAPI, store: FeatureStore) -> None:
 
     app.include_router(get_namespace_router(store), prefix=prefix)
     app.include_router(
-        get_table_router(
-            store,
-            credential_vender=credential_vender,
-            metadata_reader=metadata_reader,
-        ),
+        get_table_router(store, metadata_reader=metadata_reader),
         prefix=prefix,
     )
     app.include_router(
-        get_volume_router(store, credential_vender=credential_vender),
+        get_volume_router(store),
         prefix=prefix,
     )
     app.include_router(get_search_router(store), prefix=prefix)

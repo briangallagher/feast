@@ -1,17 +1,14 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 
 from feast import FeatureStore
-from feast.api.catalog.connections import resolve_credentials
-from feast.api.catalog.credentials import STSCredentialVender
 from feast.api.catalog.errors import (
     VolumeAlreadyExistsException,
     VolumeNotFoundException,
 )
 from feast.api.catalog.mapping import (
-    CATALOG_MANAGED_TAG,
     CATALOG_PROJECT,
     DEFAULT_COLLECTION,
     ensure_catalog_project,
@@ -39,7 +36,6 @@ def _is_volume(ds: SavedDataset) -> bool:
 
 def get_volume_router(
     store: FeatureStore,
-    credential_vender: Optional[STSCredentialVender] = None,
 ) -> APIRouter:
     router = APIRouter(tags=["iceberg-catalog-volumes"])
 
@@ -61,7 +57,7 @@ def get_volume_router(
         datasets = store.registry.list_saved_datasets(
             project=CATALOG_PROJECT,
             allow_cache=False,
-            tags={CATALOG_MANAGED_TAG: "true", "asset_type": VOLUME_ASSET_TYPE},
+            tags={"asset_type": VOLUME_ASSET_TYPE},
             namespace=prefix,
         )
         filtered = [
@@ -73,7 +69,7 @@ def get_volume_router(
 
     @router.post("/{prefix}/namespaces/{namespace}/volumes", status_code=200)
     def create_volume(
-        prefix: str, namespace: str, request: CreateVolumeRequest
+        prefix: str, namespace: str, request: CreateVolumeRequest, http_request: Request
     ) -> VolumeInfo:
         ensure_catalog_project(store)
         ns_parts = decode_namespace(namespace)
@@ -91,7 +87,6 @@ def get_volume_router(
             pass
 
         tags = dict(request.properties) if request.properties else {}
-        tags[CATALOG_MANAGED_TAG] = "true"
         tags["asset_type"] = VOLUME_ASSET_TYPE
         tags["volume_type"] = request.resolved_type()
         tags["location"] = request.resolved_location()
@@ -101,6 +96,7 @@ def get_volume_router(
             tags["comment"] = request.comment
         if request.connection_ref:
             tags["connection-ref"] = request.connection_ref
+        tags["registered_by"] = http_request.headers.get("X-User") or http_request.headers.get("kubeflow-userid", "unknown")
 
         ds = SavedDataset(
             name=scoped,
@@ -126,19 +122,7 @@ def get_volume_router(
             raise VolumeNotFoundException(namespace, volume)
         if not _is_volume(ds):
             raise VolumeNotFoundException(namespace, volume)
-        result = saved_dataset_to_volume_info(ds, prefix)
-        connection_creds = resolve_credentials(ds, prefix)
-        if connection_creds:
-            result.config.update(connection_creds)
-        elif credential_vender:
-            location = ds.tags.get("location", "")
-            if location.startswith("s3://"):
-                try:
-                    vended = credential_vender.vend(location)
-                    result.config.update(vended)
-                except Exception as e:
-                    logger.warning("STS vending failed for %s: %s", volume, e)
-        return result
+        return saved_dataset_to_volume_info(ds, prefix)
 
     @router.head("/{prefix}/namespaces/{namespace}/volumes/{volume}")
     def volume_exists(prefix: str, namespace: str, volume: str) -> Response:

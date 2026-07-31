@@ -5,14 +5,11 @@ from fastapi import APIRouter, Response
 from fastapi.responses import JSONResponse
 
 from feast import FeatureStore
-from feast.api.catalog.connections import resolve_credentials
-from feast.api.catalog.credentials import STSCredentialVender
 from feast.api.catalog.errors import (
     TableAlreadyExistsException,
     TableNotFoundException,
 )
 from feast.api.catalog.mapping import (
-    CATALOG_MANAGED_TAG,
     CATALOG_PROJECT,
     DEFAULT_COLLECTION,
     ensure_catalog_project,
@@ -46,7 +43,6 @@ def _is_table(ds: SavedDataset) -> bool:
 
 def get_table_router(
     store: FeatureStore,
-    credential_vender: Optional[STSCredentialVender] = None,
     metadata_reader: Optional[IcebergMetadataReader] = None,
 ) -> APIRouter:
     router = APIRouter(tags=["iceberg-catalog-tables"])
@@ -69,7 +65,7 @@ def get_table_router(
         datasets = store.registry.list_saved_datasets(
             project=CATALOG_PROJECT,
             allow_cache=False,
-            tags={CATALOG_MANAGED_TAG: "true", "asset_type": TABLE_ASSET_TYPE},
+            tags={"asset_type": TABLE_ASSET_TYPE},
             namespace=prefix,
         )
         filtered = [
@@ -115,11 +111,11 @@ def get_table_router(
             ]
 
         location = (
-            request.location or f"feast://{prefix}/{ns_name}/tables/{request.name}"
+            request.location or ""
         )
         properties = dict(request.properties) if request.properties else {}
-        properties[CATALOG_MANAGED_TAG] = "true"
         properties["asset_type"] = TABLE_ASSET_TYPE
+        properties["format"] = "iceberg"
         properties["location"] = location
 
         ds = SavedDataset(
@@ -151,26 +147,17 @@ def get_table_router(
             raise TableNotFoundException(namespace, table)
 
         location = ds.tags.get("location", "")
-        connection_creds = resolve_credentials(ds, prefix)
 
         if metadata_reader and location.startswith("s3://"):
             catalog_properties = {
                 k: v
                 for k, v in ds.tags.items()
-                if k not in (CATALOG_MANAGED_TAG, "asset_type", "location")
+                if k not in ("asset_type", "location")
             }
             real_response = metadata_reader.build_load_table_response(
                 location, table_properties=catalog_properties
             )
             if real_response:
-                if connection_creds:
-                    real_response["config"].update(connection_creds)
-                elif credential_vender:
-                    try:
-                        vended = credential_vender.vend(location)
-                        real_response["config"].update(vended)
-                    except Exception as e:
-                        logger.warning("STS vending failed for %s: %s", table, e)
                 return JSONResponse(content=real_response)
             logger.warning(
                 "Could not read Iceberg metadata for %s at %s — falling back to synthetic",
@@ -178,16 +165,7 @@ def get_table_router(
                 location,
             )
 
-        result = saved_dataset_to_load_table_response(ds, prefix)
-        if connection_creds:
-            result.config.update(connection_creds)
-        elif credential_vender and location.startswith("s3://"):
-            try:
-                vended = credential_vender.vend(location)
-                result.config.update(vended)
-            except Exception as e:
-                logger.warning("STS vending failed for %s: %s", table, e)
-        return result
+        return saved_dataset_to_load_table_response(ds, prefix)
 
     @router.head("/{prefix}/namespaces/{namespace}/tables/{table}")
     def table_exists(prefix: str, namespace: str, table: str) -> Response:
