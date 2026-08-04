@@ -254,8 +254,8 @@ def get_table_router(
         )
         return saved_dataset_to_load_table_response(updated, prefix)
 
-    @router.post("/{prefix}/tables/rename", status_code=200)
-    def rename_table(prefix: str, request: RenameTableRequest) -> None:
+    @router.post("/{prefix}/tables/rename", status_code=204)
+    def rename_table(prefix: str, request: RenameTableRequest) -> Response:
         src_ns = (
             request.source.namespace[0]
             if request.source.namespace
@@ -301,5 +301,6 @@ def get_table_router(
         store.registry.delete_saved_dataset(
             src_scoped, project=CATALOG_PROJECT, commit=True
         )
+        return Response(status_code=204)
 
     return router

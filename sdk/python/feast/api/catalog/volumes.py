@@ -176,6 +176,8 @@ def get_volume_router(store: FeatureStore) -> APIRouter:
         tags = dict(ds.tags)
         if request.comment is not None:
             tags["comment"] = request.comment
+        if request.owner is not None:
+            tags["owner"] = request.owner
         if request.properties:
             tags.update(request.properties)
         if request.storage_location is not None:

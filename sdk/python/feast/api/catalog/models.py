@@ -194,7 +194,7 @@ class CreateVolumeRequest(BaseModel):
         return self.location or self.storage_location or ""
 
     def resolved_type(self) -> str:
-        return self.volume_type or self.content_type or "unknown"
+        return self.volume_type or self.content_type or "EXTERNAL"
 
 
 class UpdateVolumeRequest(BaseModel):
