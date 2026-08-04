@@ -19,6 +19,10 @@ from fastapi import APIRouter, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from feast import FeatureStore
+from feast.api.catalog.errors import (
+    TableAlreadyExistsException,
+    TableNotFoundException,
+)
 from feast.api.catalog.mapping import (
     CATALOG_PROJECT,
     DEFAULT_COLLECTION,
@@ -39,19 +43,6 @@ logger = logging.getLogger(__name__)
 
 TABLE_ASSET_TYPE = "table"
 VOLUME_ASSET_TYPE = "volume"
-DATABASE_ASSET_TYPE = "database"
-
-SUPPORTED_DB_TYPES = [
-    "postgresql",
-    "mysql",
-    "snowflake",
-    "mssql",
-    "oracle",
-    "mongodb",
-    "redis",
-    "cockroachdb",
-    "mariadb",
-]
 
 SYSTEM_TAGS = {
     "asset_type",
@@ -60,10 +51,6 @@ SYSTEM_TAGS = {
     "connection-ref",
     "connection_ref",
     "description",
-    "db_type",
-    "host",
-    "database",
-    "schemas",
     "content_type",
     "namespace",
     "collection",
@@ -105,30 +92,14 @@ class CreateVolumeRequest(BaseModel):
     properties: Optional[Dict[str, str]] = None
 
 
-class CreateDatabaseRequest(BaseModel):
-    name: str
-    db_type: str
-    host: str
-    database: str
-    schemas: Optional[List[str]] = None
-    connection_ref: Optional[str] = None
-    description: Optional[str] = None
-    properties: Optional[Dict[str, str]] = None
-
-
 class AssetResponse(BaseModel):
-    """Generic asset representation returned by the Catalog API."""
+    """Generic asset representation returned by the Data Registry API."""
 
     name: str
     asset_type: str
     # Table fields
     format: Optional[str] = None
     location: Optional[str] = None
-    # Database fields
-    db_type: Optional[str] = None
-    host: Optional[str] = None
-    database: Optional[str] = None
-    schemas: Optional[List[str]] = None
     # Volume fields
     content_type: Optional[str] = None
     # Schema fields
@@ -201,14 +172,6 @@ def _saved_dataset_to_asset(ds: SavedDataset) -> AssetResponse:
     elif asset_type == VOLUME_ASSET_TYPE:
         common["location"] = ds.tags.get("location")
         common["content_type"] = ds.tags.get("content_type")
-    elif asset_type == DATABASE_ASSET_TYPE:
-        common["db_type"] = ds.tags.get("db_type")
-        common["host"] = ds.tags.get("host")
-        common["database"] = ds.tags.get("database")
-        schemas_raw = ds.tags.get("schemas", "")
-        common["schemas"] = (
-            [s for s in schemas_raw.split(",") if s] if schemas_raw else []
-        )
 
     return AssetResponse(**common)
 
@@ -539,104 +502,6 @@ def get_catalog_api_router(store: FeatureStore) -> APIRouter:
     # Databases
     # -----------------------------------------------------------------------
 
-    @router.get("/projects/{project}/collections/{collection}/databases")
-    def list_databases(project: str, collection: str) -> AssetListResponse:
-        ensure_catalog_project(store)
-        datasets = store.registry.list_saved_datasets(
-            project=CATALOG_PROJECT,
-            allow_cache=False,
-            tags={"asset_type": DATABASE_ASSET_TYPE},
-            namespace=project,
-        )
-        filtered = [
-            ds for ds in datasets if (ds.collection or DEFAULT_COLLECTION) == collection
-        ]
-        return AssetListResponse(
-            assets=[_saved_dataset_to_asset(ds) for ds in filtered]
-        )
-
-    @router.post(
-        "/projects/{project}/collections/{collection}/databases",
-        status_code=201,
-    )
-    def create_database(
-        project: str, collection: str, request: CreateDatabaseRequest
-    ) -> AssetResponse:
-        ensure_catalog_project(store)
-
-        if request.db_type not in SUPPORTED_DB_TYPES:
-            raise _bad_request(
-                f"Unsupported database type: {request.db_type}. "
-                f"Supported: {', '.join(SUPPORTED_DB_TYPES)}"
-            )
-
-        scoped = make_scoped_name(project, collection, request.name)
-        try:
-            existing = store.registry.get_saved_dataset(
-                scoped, project=CATALOG_PROJECT, allow_cache=False
-            )
-            if existing.tags.get("asset_type") == DATABASE_ASSET_TYPE:
-                raise _conflict(f"Database already exists: {collection}.{request.name}")
-        except FeastObjectNotFoundException:
-            pass
-
-        tags: Dict[str, str] = {
-            "asset_type": DATABASE_ASSET_TYPE,
-            "db_type": request.db_type,
-            "host": request.host,
-            "database": request.database,
-            "schemas": ",".join(request.schemas) if request.schemas else "",
-            "connection-ref": request.connection_ref or "",
-            "description": request.description or "",
-        }
-        if request.properties:
-            for k, v in request.properties.items():
-                if k not in tags:
-                    tags[k] = v
-
-        ds = SavedDataset(
-            name=scoped,
-            tags=tags,
-            namespace=project,
-            collection=collection,
-        )
-        store.registry.apply_saved_dataset(ds, project=CATALOG_PROJECT, commit=True)
-        return _saved_dataset_to_asset(ds)
-
-    @router.get("/projects/{project}/collections/{collection}/databases/{database}")
-    def get_database(project: str, collection: str, database: str) -> AssetResponse:
-        ensure_catalog_project(store)
-        scoped = make_scoped_name(project, collection, database)
-        try:
-            ds = store.registry.get_saved_dataset(
-                scoped, project=CATALOG_PROJECT, allow_cache=False
-            )
-        except FeastObjectNotFoundException:
-            raise _not_found(f"Database not found: {collection}.{database}")
-        if ds.tags.get("asset_type") != DATABASE_ASSET_TYPE:
-            raise _not_found(f"Database not found: {collection}.{database}")
-        return _saved_dataset_to_asset(ds)
-
-    @router.delete(
-        "/projects/{project}/collections/{collection}/databases/{database}",
-        status_code=204,
-    )
-    def delete_database(project: str, collection: str, database: str) -> Response:
-        ensure_catalog_project(store)
-        scoped = make_scoped_name(project, collection, database)
-        try:
-            ds = store.registry.get_saved_dataset(
-                scoped, project=CATALOG_PROJECT, allow_cache=False
-            )
-        except FeastObjectNotFoundException:
-            raise _not_found(f"Database not found: {collection}.{database}")
-        if ds.tags.get("asset_type") != DATABASE_ASSET_TYPE:
-            raise _not_found(f"Database not found: {collection}.{database}")
-        store.registry.delete_saved_dataset(
-            scoped, project=CATALOG_PROJECT, commit=True
-        )
-        return Response(status_code=204)
-
     # -----------------------------------------------------------------------
     # Search
     # -----------------------------------------------------------------------
@@ -793,7 +658,7 @@ def get_generic_tables_router(store: FeatureStore) -> APIRouter:
                 scoped, project=CATALOG_PROJECT, allow_cache=False, namespace=rhai_ns,
             )
             if existing.tags.get("asset_type") == TABLE_ASSET_TYPE and (existing.collection or "") == collection:
-                raise _conflict(f"Table already exists: {namespace}.{body.name}")
+                raise TableAlreadyExistsException(namespace, body.name)
         except FeastObjectNotFoundException:
             pass
 
@@ -824,16 +689,10 @@ def get_generic_tables_router(store: FeatureStore) -> APIRouter:
             "description": body.description or "",
             "registered_by": request.headers.get("X-User") or request.headers.get("kubeflow-userid", "unknown"),
         }
-        if body.purpose:
-            tags["purpose"] = body.purpose
-        if body.license:
-            tags["license"] = body.license
-        if body.maturity:
-            tags["maturity"] = body.maturity
-        if body.domain:
-            tags["domain"] = body.domain
-        if body.pii:
-            tags["pii"] = body.pii
+        for gov_field in ("purpose", "license", "maturity", "domain", "pii"):
+            value = getattr(body, gov_field, None)
+            if value:
+                tags[gov_field] = value
         if col_meta:
             tags["_col_meta"] = json.dumps(col_meta)
         if body.properties:
@@ -859,11 +718,11 @@ def get_generic_tables_router(store: FeatureStore) -> APIRouter:
                 scoped, project=CATALOG_PROJECT, allow_cache=False, namespace=rhai_ns,
             )
         except FeastObjectNotFoundException:
-            raise _not_found(f"Table not found: {namespace}.{table}")
+            raise TableNotFoundException(namespace, table)
         if ds.tags.get("asset_type") != TABLE_ASSET_TYPE:
-            raise _not_found(f"Table not found: {namespace}.{table}")
+            raise TableNotFoundException(namespace, table)
         if (ds.collection or DEFAULT_COLLECTION) != collection:
-            raise _not_found(f"Table not found: {namespace}.{table}")
+            raise TableNotFoundException(namespace, table)
         return _saved_dataset_to_asset(ds)
 
     @router.delete("/{prefix}/namespaces/{namespace}/generic-tables/{table}", status_code=204)
@@ -877,11 +736,11 @@ def get_generic_tables_router(store: FeatureStore) -> APIRouter:
                 scoped, project=CATALOG_PROJECT, allow_cache=False, namespace=rhai_ns,
             )
         except FeastObjectNotFoundException:
-            raise _not_found(f"Table not found: {namespace}.{table}")
+            raise TableNotFoundException(namespace, table)
         if ds.tags.get("asset_type") != TABLE_ASSET_TYPE:
-            raise _not_found(f"Table not found: {namespace}.{table}")
+            raise TableNotFoundException(namespace, table)
         if (ds.collection or DEFAULT_COLLECTION) != collection:
-            raise _not_found(f"Table not found: {namespace}.{table}")
+            raise TableNotFoundException(namespace, table)
         store.registry.delete_saved_dataset(
             scoped, project=CATALOG_PROJECT, commit=True, namespace=rhai_ns,
         )

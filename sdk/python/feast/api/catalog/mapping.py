@@ -88,7 +88,18 @@ def _make_uuid(namespace: str, name: str) -> str:
     return str(uuid.uuid5(CATALOG_UUID_NAMESPACE, f"{namespace}.{name}"))
 
 
+def _timestamp_iso(dt: Any) -> Optional[str]:
+    """Return an ISO 8601 string, or None if dt is missing."""
+    if dt is None:
+        return None
+    from datetime import datetime
+    if isinstance(dt, datetime):
+        return dt.isoformat()
+    return str(dt)
+
+
 def _timestamp_ms(dt: Any) -> int:
+    """Return epoch milliseconds (used by TableMetadata.last-updated-ms)."""
     if dt is None:
         return 0
     return int(dt.timestamp() * 1000)
@@ -212,7 +223,7 @@ def saved_dataset_to_volume_info(ds: SavedDataset, namespace: str) -> VolumeInfo
         volume_type=volume_type,
         storage_location=location,
         comment=comment,
-        created_at=created.isoformat() if created else None,
-        updated_at=updated.isoformat() if updated else None,
+        created_at=_timestamp_iso(created),
+        updated_at=_timestamp_iso(updated),
         properties=tags,
     )

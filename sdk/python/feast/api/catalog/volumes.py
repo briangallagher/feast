@@ -34,9 +34,7 @@ def _is_volume(ds: SavedDataset) -> bool:
     return ds.tags.get("asset_type") == VOLUME_ASSET_TYPE
 
 
-def get_volume_router(
-    store: FeatureStore,
-) -> APIRouter:
+def get_volume_router(store: FeatureStore) -> APIRouter:
     router = APIRouter(tags=["iceberg-catalog-volumes"])
 
     # ------------------------------------------------------------------
@@ -103,7 +101,6 @@ def get_volume_router(
             tags=tags,
             namespace=prefix,
             collection=ns_name,
-            data_source_ref=request.data_source_ref or "",
         )
         store.registry.apply_saved_dataset(ds, project=CATALOG_PROJECT, commit=True)
         return saved_dataset_to_volume_info(ds, prefix)
@@ -184,16 +181,11 @@ def get_volume_router(
         if request.storage_location is not None:
             tags["location"] = request.storage_location
 
-        data_source_ref = ds.data_source_ref
-        if request.data_source_ref is not None:
-            data_source_ref = request.data_source_ref
-
         updated = SavedDataset(
             name=scoped,
             tags=tags,
             namespace=prefix,
             collection=ns_name,
-            data_source_ref=data_source_ref,
         )
         updated.created_timestamp = ds.created_timestamp
         store.registry.apply_saved_dataset(

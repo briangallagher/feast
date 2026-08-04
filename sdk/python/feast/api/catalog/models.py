@@ -186,7 +186,6 @@ class CreateVolumeRequest(BaseModel):
     connection_ref: Optional[str] = None
     comment: Optional[str] = None
     description: Optional[str] = None
-    data_source_ref: Optional[str] = None
     properties: Optional[Dict[str, str]] = None
 
     model_config = {"populate_by_name": True}
@@ -202,7 +201,6 @@ class UpdateVolumeRequest(BaseModel):
     comment: Optional[str] = None
     owner: Optional[str] = None
     storage_location: Optional[str] = Field(default=None, alias="storage_location")
-    data_source_ref: Optional[str] = None
     properties: Optional[Dict[str, str]] = None
 
 
