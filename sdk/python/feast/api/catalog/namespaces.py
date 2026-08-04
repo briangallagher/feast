@@ -86,12 +86,20 @@ def get_namespace_router(store: FeatureStore) -> APIRouter:
         ensure_catalog_project(store)
         ns_parts = decode_namespace(namespace)
         ns_name = ns_parts[0] if ns_parts else namespace
+        collections = list_collections_for_ns(store, prefix)
+        if ns_name not in collections and ns_name != DEFAULT_COLLECTION:
+            raise NamespaceNotFoundException(ns_name)
         project = store.registry.get_project(CATALOG_PROJECT, allow_cache=True)
         return project_to_namespace_response(project, ns_name)
 
     @router.head("/{prefix}/namespaces/{namespace}")
     def namespace_exists(prefix: str, namespace: str) -> Response:
         ensure_catalog_project(store)
+        ns_parts = decode_namespace(namespace)
+        ns_name = ns_parts[0] if ns_parts else namespace
+        collections = list_collections_for_ns(store, prefix)
+        if ns_name not in collections and ns_name != DEFAULT_COLLECTION:
+            raise NamespaceNotFoundException(ns_name)
         return Response(status_code=204)
 
     @router.delete("/{prefix}/namespaces/{namespace}", status_code=204)

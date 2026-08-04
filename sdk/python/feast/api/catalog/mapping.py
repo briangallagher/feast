@@ -135,12 +135,12 @@ def project_to_namespace_response(
         properties["description"] = project.description
     if project.owner:
         properties["owner"] = project.owner
-    created_ms = _timestamp_ms(getattr(project, "created_timestamp", None))
-    if created_ms:
-        properties["created_at"] = str(created_ms)
-    updated_ms = _timestamp_ms(getattr(project, "last_updated_timestamp", None))
-    if updated_ms:
-        properties["updated_at"] = str(updated_ms)
+    created_iso = _timestamp_iso(getattr(project, "created_timestamp", None))
+    if created_iso:
+        properties["created_at"] = created_iso
+    updated_iso = _timestamp_iso(getattr(project, "last_updated_timestamp", None))
+    if updated_iso:
+        properties["updated_at"] = updated_iso
     ns = [collection] if collection else [project.name]
     return NamespaceResponse(
         namespace=ns,
@@ -207,7 +207,7 @@ def saved_dataset_to_volume_info(ds: SavedDataset, namespace: str) -> VolumeInfo
     tags = {
         k: v
         for k, v in ds.tags.items()
-        if k not in ("asset_type", "volume_type", "comment")
+        if k not in ("asset_type", "volume_type", "comment", "owner")
     }
     volume_type = ds.tags.get("volume_type", "EXTERNAL")
     comment: Optional[str] = ds.tags.get("comment")
@@ -216,6 +216,8 @@ def saved_dataset_to_volume_info(ds: SavedDataset, namespace: str) -> VolumeInfo
     created = getattr(ds, "created_timestamp", None)
     updated = getattr(ds, "last_updated_timestamp", None)
 
+    owner: Optional[str] = ds.tags.get("owner")
+
     return VolumeInfo(  # type: ignore[call-arg]
         name=display_name,
         catalog_name=namespace,
@@ -223,6 +225,7 @@ def saved_dataset_to_volume_info(ds: SavedDataset, namespace: str) -> VolumeInfo
         volume_type=volume_type,
         storage_location=location,
         comment=comment,
+        owner=owner,
         created_at=_timestamp_iso(created),
         updated_at=_timestamp_iso(updated),
         properties=tags,
