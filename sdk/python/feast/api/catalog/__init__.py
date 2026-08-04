@@ -17,6 +17,7 @@ from feast.api.catalog.volumes import get_volume_router
 logger = logging.getLogger(__name__)
 
 CATALOG_ENDPOINTS = [
+    "GET /v1/config",
     "GET /v1/{prefix}/config",
     "GET /v1/{prefix}/namespaces",
     "POST /v1/{prefix}/namespaces",
@@ -30,12 +31,15 @@ CATALOG_ENDPOINTS = [
     "HEAD /v1/{prefix}/namespaces/{namespace}/tables/{table}",
     "POST /v1/{prefix}/namespaces/{namespace}/tables/{table}",
     "DELETE /v1/{prefix}/namespaces/{namespace}/tables/{table}",
+    "POST /v1/{prefix}/tables/rename",
     # Extensions
     "GET /v1/projects",
     "GET /v1/{prefix}/search",
     "GET /v1/{prefix}/namespaces/{namespace}/volumes",
     "POST /v1/{prefix}/namespaces/{namespace}/volumes",
     "GET /v1/{prefix}/namespaces/{namespace}/volumes/{volume}",
+    "HEAD /v1/{prefix}/namespaces/{namespace}/volumes/{volume}",
+    "PUT /v1/{prefix}/namespaces/{namespace}/volumes/{volume}",
     "DELETE /v1/{prefix}/namespaces/{namespace}/volumes/{volume}",
     # Generic-tables extension (all formats)
     "GET /v1/{prefix}/namespaces/{namespace}/generic-tables",
