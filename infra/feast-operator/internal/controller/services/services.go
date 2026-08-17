@@ -31,6 +31,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -108,37 +109,240 @@ func (feast *FeastServices) Deploy() error {
 	if err := feast.ReconcileCatalogClusterRoles(); err != nil {
 		return err
 	}
+	if feast.IsCatalogMode() {
+		if err := feast.reconcileCatalogProxyConfig(); err != nil {
+			return err
+		}
+	}
 
 	return nil
+}
+
+func (feast *FeastServices) reconcileCatalogProxyConfig() error {
+	authYAML := `authorization:
+  rewrites:
+    byPathSegment:
+      index: 1
+  resourceAttributes:
+    namespace: "{{ .Value }}"
+    apiGroup: dataregistry.opendatahub.io
+    resource: namespaces
+    verb: get
+  endpoints:
+    - path: /v1/*/namespaces
+      mappings:
+        - methods: [get]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: namespaces
+                verb: list
+        - methods: [post]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: namespaces
+                verb: create
+    - path: /v1/*/namespaces/*/tables
+      mappings:
+        - methods: [get]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: tables
+                verb: list
+        - methods: [post]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: tables
+                verb: create
+    - path: /v1/*/namespaces/*/tables/*
+      mappings:
+        - methods: [get, head]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: tables
+                verb: get
+        - methods: [post]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: tables
+                verb: update
+        - methods: [delete]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: tables
+                verb: delete
+    - path: /v1/*/namespaces/*/generic-tables
+      mappings:
+        - methods: [get]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: tables
+                verb: list
+        - methods: [post]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: tables
+                verb: create
+    - path: /v1/*/namespaces/*/generic-tables/*
+      mappings:
+        - methods: [get]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: tables
+                verb: get
+        - methods: [delete]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: tables
+                verb: delete
+    - path: /v1/*/namespaces/*/volumes
+      mappings:
+        - methods: [get]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: volumes
+                verb: list
+        - methods: [post]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: volumes
+                verb: create
+    - path: /v1/*/namespaces/*/volumes/*
+      mappings:
+        - methods: [get, head]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: volumes
+                verb: get
+        - methods: [put]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: volumes
+                verb: update
+        - methods: [delete]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: volumes
+                verb: delete
+    - path: /v1/*/search
+      mappings:
+        - methods: [get]
+          resources:
+            - rewrites:
+                byPathSegment:
+                  index: 1
+              resourceAttributes:
+                namespace: "{{.FromPathSegment}}"
+                apiGroup: dataregistry.opendatahub.io
+                resource: tables
+                verb: list
+`
+	cmName := feast.GetFeastServiceName(RegistryFeastType) + "-rbac-proxy-config"
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cmName,
+			Namespace: feast.Handler.FeatureStore.Namespace,
+		},
+	}
+	_, err := controllerutil.CreateOrUpdate(feast.Handler.Context, feast.Handler.Client, cm, func() error {
+		cm.Data = map[string]string{
+			"auth.yaml": authYAML,
+		}
+		return controllerutil.SetControllerReference(feast.Handler.FeatureStore, cm, feast.Handler.Scheme)
+	})
+	return err
 }
 
 // IsCatalogMode returns true if the FeatureStore CR has catalog mode enabled.
 func (feast *FeastServices) IsCatalogMode() bool {
 	cr := feast.Handler.FeatureStore
-	return cr.Spec.Catalog != nil && cr.Spec.Catalog.Enabled
+	return cr.Annotations["opendatahub.io/data-registry-enabled"] == "true"
 }
 
 // CatalogEnvVars returns the environment variables to inject when catalog mode is enabled.
 func (feast *FeastServices) CatalogEnvVars() []corev1.EnvVar {
-	cr := feast.Handler.FeatureStore
-	vars := []corev1.EnvVar{
+	return []corev1.EnvVar{
 		{Name: "DATACATALOG_ENABLED", Value: "true"},
 	}
-	if cr.Spec.Catalog.SSAR != nil {
-		if cr.Spec.Catalog.SSAR.APIGroup != "" {
-			vars = append(vars, corev1.EnvVar{
-				Name:  "CATALOG_SSAR_API_GROUP",
-				Value: cr.Spec.Catalog.SSAR.APIGroup,
-			})
-		}
-		if len(cr.Spec.Catalog.SSAR.Resources) > 0 {
-			vars = append(vars, corev1.EnvVar{
-				Name:  "CATALOG_SSAR_RESOURCES",
-				Value: strings.Join(cr.Spec.Catalog.SSAR.Resources, ","),
-			})
-		}
-	}
-	return vars
 }
 
 // reconcileServices validates persistence and deploys or removes each feast
@@ -515,6 +719,63 @@ func (feast *FeastServices) setDeployment(deploy *appsv1.Deployment) error {
 func (feast *FeastServices) setPod(podSpec *corev1.PodSpec) error {
 	if err := feast.setContainers(podSpec); err != nil {
 		return err
+	}
+	if feast.IsCatalogMode() {
+		proxyContainer := corev1.Container{
+			Name:            "kube-rbac-proxy",
+			Image:           "quay.io/mstoklus/workbench-images:kube-rbac-proxy",
+			ImagePullPolicy: corev1.PullAlways,
+			Args: []string{
+				"--secure-listen-address=0.0.0.0:8443",
+				"--upstream=http://127.0.0.1:6572/",
+				"--config-file=/etc/kube-rbac-proxy/auth.yaml",
+				"--tls-cert-file=/etc/tls/private/tls.crt",
+				"--tls-private-key-file=/etc/tls/private/tls.key",
+				"--ignore-paths=/v1/config,/v1/projects",
+				"--auth-header-fields-enabled=true",
+				"--auth-header-user-field-name=X-User",
+			},
+			Ports: []corev1.ContainerPort{
+				{ContainerPort: 8443, Name: "https", Protocol: corev1.ProtocolTCP},
+			},
+			VolumeMounts: []corev1.VolumeMount{
+				{Name: "rbac-proxy-config", MountPath: "/etc/kube-rbac-proxy"},
+				{Name: "tls-certs", MountPath: "/etc/tls/private", ReadOnly: true},
+			},
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("10m"),
+					corev1.ResourceMemory: resource.MustParse("32Mi"),
+				},
+				Limits: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("100m"),
+					corev1.ResourceMemory: resource.MustParse("64Mi"),
+				},
+			},
+		}
+		podSpec.Containers = append(podSpec.Containers, proxyContainer)
+
+		// Add volumes for proxy
+		podSpec.Volumes = append(podSpec.Volumes,
+			corev1.Volume{
+				Name: "rbac-proxy-config",
+				VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: feast.GetFeastServiceName(RegistryFeastType) + "-rbac-proxy-config",
+						},
+					},
+				},
+			},
+			corev1.Volume{
+				Name: "tls-certs",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: feast.GetFeastServiceName(RegistryFeastType) + "-tls",
+					},
+				},
+			},
+		)
 	}
 	feast.mountTlsConfigs(podSpec)
 	feast.mountPvcConfigs(podSpec)
@@ -956,6 +1217,19 @@ func (feast *FeastServices) setService(svc *corev1.Service, feastType FeastServi
 			Protocol:   corev1.ProtocolTCP,
 			TargetPort: intstr.FromInt(int(MetricsPort)),
 		})
+	}
+
+	if feast.IsCatalogMode() {
+		svc.Spec.Ports = append(svc.Spec.Ports, corev1.ServicePort{
+			Name:       "https-proxy",
+			Port:       8443,
+			TargetPort: intstr.FromInt(8443),
+			Protocol:   corev1.ProtocolTCP,
+		})
+		if svc.Annotations == nil {
+			svc.Annotations = make(map[string]string)
+		}
+		svc.Annotations["service.beta.openshift.io/serving-cert-secret-name"] = feast.GetFeastServiceName(RegistryFeastType) + "-tls"
 	}
 
 	return controllerutil.SetControllerReference(feast.Handler.FeatureStore, svc, feast.Handler.Scheme)

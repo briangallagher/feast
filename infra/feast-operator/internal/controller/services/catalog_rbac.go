@@ -25,14 +25,14 @@ import (
 )
 
 const (
-	datacatalogAPIGroup         = "datacatalog.opendatahub.io"
-	datacatalogViewerRoleName   = "datacatalog-viewer"
-	datacatalogEditorRoleName   = "datacatalog-editor"
-	datacatalogAdminRoleName    = "datacatalog-admin"
-	connectionReaderRoleName    = "feast-catalog-connection-reader"
+	dataregistryAPIGroup       = "dataregistry.opendatahub.io"
+	dataregistryViewRoleName   = "dataregistry-view"
+	dataregistryEditRoleName   = "dataregistry-edit"
+	dataregistryAdminRoleName  = "dataregistry-admin"
+	authProxyRoleName          = "feast-catalog-auth-proxy"
 )
 
-var datacatalogResources = []string{"namespaces", "tables", "volumes"}
+var dataregistryResources = []string{"namespaces", "tables", "volumes"}
 
 func (feast *FeastServices) ReconcileCatalogClusterRoles() error {
 	if !feast.IsCatalogMode() {
@@ -41,17 +41,8 @@ func (feast *FeastServices) ReconcileCatalogClusterRoles() error {
 
 	logger := log.FromContext(feast.Handler.Context)
 
-	apiGroup := datacatalogAPIGroup
-	resources := datacatalogResources
-	cr := feast.Handler.FeatureStore
-	if cr.Spec.Catalog.SSAR != nil {
-		if cr.Spec.Catalog.SSAR.APIGroup != "" {
-			apiGroup = cr.Spec.Catalog.SSAR.APIGroup
-		}
-		if len(cr.Spec.Catalog.SSAR.Resources) > 0 {
-			resources = cr.Spec.Catalog.SSAR.Resources
-		}
-	}
+	apiGroup := dataregistryAPIGroup
+	resources := dataregistryResources
 
 	clusterRoles := []struct {
 		name   string
@@ -59,7 +50,7 @@ func (feast *FeastServices) ReconcileCatalogClusterRoles() error {
 		labels map[string]string
 	}{
 		{
-			name:  datacatalogViewerRoleName,
+			name:  dataregistryViewRoleName,
 			verbs: []string{"get", "list"},
 			labels: map[string]string{
 				"rbac.authorization.k8s.io/aggregate-to-view":  "true",
@@ -68,7 +59,7 @@ func (feast *FeastServices) ReconcileCatalogClusterRoles() error {
 			},
 		},
 		{
-			name:  datacatalogEditorRoleName,
+			name:  dataregistryEditRoleName,
 			verbs: []string{"get", "list", "create", "update", "delete"},
 			labels: map[string]string{
 				"rbac.authorization.k8s.io/aggregate-to-edit":  "true",
@@ -76,7 +67,7 @@ func (feast *FeastServices) ReconcileCatalogClusterRoles() error {
 			},
 		},
 		{
-			name:  datacatalogAdminRoleName,
+			name:  dataregistryAdminRoleName,
 			verbs: []string{"get", "list", "create", "update", "delete"},
 			labels: map[string]string{
 				"rbac.authorization.k8s.io/aggregate-to-admin": "true",
@@ -119,36 +110,47 @@ func (feast *FeastServices) ReconcileCatalogClusterRoles() error {
 		}
 	}
 
-	connReaderRole := &rbacv1.ClusterRole{
+	// Auth proxy ClusterRole for kube-rbac-proxy to perform token reviews and subject access reviews
+	authProxyRole := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: connectionReaderRoleName,
+			Name: authProxyRoleName,
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
-				APIGroups: []string{""},
-				Resources: []string{"secrets"},
-				Verbs:     []string{"get"},
+				APIGroups: []string{"authentication.k8s.io"},
+				Resources: []string{"tokenreviews"},
+				Verbs:     []string{"create"},
+			},
+			{
+				APIGroups: []string{"authorization.k8s.io"},
+				Resources: []string{"subjectaccessreviews"},
+				Verbs:     []string{"create"},
 			},
 		},
 	}
 
 	existing := &rbacv1.ClusterRole{}
-	err := feast.Handler.Client.Get(feast.Handler.Context, client.ObjectKeyFromObject(connReaderRole), existing)
+	err := feast.Handler.Client.Get(feast.Handler.Context, client.ObjectKeyFromObject(authProxyRole), existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			logger.Info("Creating ClusterRole", "name", connectionReaderRoleName)
-			if err := feast.Handler.Client.Create(feast.Handler.Context, connReaderRole); err != nil {
+			logger.Info("Creating ClusterRole", "name", authProxyRoleName)
+			if err := feast.Handler.Client.Create(feast.Handler.Context, authProxyRole); err != nil {
 				return err
 			}
 		} else {
 			return err
 		}
+	} else {
+		existing.Rules = authProxyRole.Rules
+		if err := feast.Handler.Client.Update(feast.Handler.Context, existing); err != nil {
+			return err
+		}
 	}
 
 	sa := feast.initFeastSA()
-	connReaderBinding := &rbacv1.ClusterRoleBinding{
+	authProxyBinding := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: connectionReaderRoleName,
+			Name: authProxyRoleName,
 		},
 		Subjects: []rbacv1.Subject{
 			{
@@ -160,21 +162,21 @@ func (feast *FeastServices) ReconcileCatalogClusterRoles() error {
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: "rbac.authorization.k8s.io",
 			Kind:     "ClusterRole",
-			Name:     connectionReaderRoleName,
+			Name:     authProxyRoleName,
 		},
 	}
 
 	existingBinding := &rbacv1.ClusterRoleBinding{}
-	err = feast.Handler.Client.Get(feast.Handler.Context, client.ObjectKeyFromObject(connReaderBinding), existingBinding)
+	err = feast.Handler.Client.Get(feast.Handler.Context, client.ObjectKeyFromObject(authProxyBinding), existingBinding)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			logger.Info("Creating ClusterRoleBinding", "name", connectionReaderRoleName)
-			return feast.Handler.Client.Create(feast.Handler.Context, connReaderBinding)
+			logger.Info("Creating ClusterRoleBinding", "name", authProxyRoleName)
+			return feast.Handler.Client.Create(feast.Handler.Context, authProxyBinding)
 		}
 		return err
 	}
 
-	existingBinding.Subjects = connReaderBinding.Subjects
-	existingBinding.RoleRef = connReaderBinding.RoleRef
+	existingBinding.Subjects = authProxyBinding.Subjects
+	existingBinding.RoleRef = authProxyBinding.RoleRef
 	return feast.Handler.Client.Update(feast.Handler.Context, existingBinding)
 }

@@ -163,30 +163,38 @@ func ApplyDefaultsToStatus(cr *feastdevv1.FeatureStore) {
 		}
 	}
 
+	// Skip online store defaults in catalog/data-registry mode
+	isCatalogMode := cr.Annotations["opendatahub.io/data-registry-enabled"] == "true"
+	if isCatalogMode {
+		services.OnlineStore = nil
+	}
+
 	// default to onlineStore service deployment
-	if services.OnlineStore == nil {
+	if !isCatalogMode && services.OnlineStore == nil {
 		services.OnlineStore = &feastdevv1.OnlineStore{}
 	}
-	if services.OnlineStore.Persistence == nil {
-		services.OnlineStore.Persistence = &feastdevv1.OnlineStorePersistence{}
-	}
-
-	if services.OnlineStore.Persistence.DBPersistence == nil {
-		if services.OnlineStore.Persistence.FilePersistence == nil {
-			services.OnlineStore.Persistence.FilePersistence = &feastdevv1.OnlineStoreFilePersistence{}
+	if !isCatalogMode && services.OnlineStore != nil {
+		if services.OnlineStore.Persistence == nil {
+			services.OnlineStore.Persistence = &feastdevv1.OnlineStorePersistence{}
 		}
 
-		if len(services.OnlineStore.Persistence.FilePersistence.Path) == 0 {
-			services.OnlineStore.Persistence.FilePersistence.Path = defaultOnlineStorePath(cr)
+		if services.OnlineStore.Persistence.DBPersistence == nil {
+			if services.OnlineStore.Persistence.FilePersistence == nil {
+				services.OnlineStore.Persistence.FilePersistence = &feastdevv1.OnlineStoreFilePersistence{}
+			}
+
+			if len(services.OnlineStore.Persistence.FilePersistence.Path) == 0 {
+				services.OnlineStore.Persistence.FilePersistence.Path = defaultOnlineStorePath(cr)
+			}
+
+			ensurePVCDefaults(services.OnlineStore.Persistence.FilePersistence.PvcConfig, OnlineFeastType)
 		}
 
-		ensurePVCDefaults(services.OnlineStore.Persistence.FilePersistence.PvcConfig, OnlineFeastType)
+		if services.OnlineStore.Server == nil {
+			services.OnlineStore.Server = &feastdevv1.ServerConfigs{}
+		}
+		setDefaultCtrConfigs(&services.OnlineStore.Server.ContainerConfigs.DefaultCtrConfigs)
 	}
-
-	if services.OnlineStore.Server == nil {
-		services.OnlineStore.Server = &feastdevv1.ServerConfigs{}
-	}
-	setDefaultCtrConfigs(&services.OnlineStore.Server.ContainerConfigs.DefaultCtrConfigs)
 
 	if services.UI != nil {
 		setDefaultCtrConfigs(&services.UI.ContainerConfigs.DefaultCtrConfigs)

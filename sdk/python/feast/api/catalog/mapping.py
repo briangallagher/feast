@@ -84,7 +84,9 @@ def list_collections_for_ns(store, rhai_ns: str) -> Set[str]:
     return collections
 
 
-def _make_uuid(namespace: str, name: str) -> str:
+def _make_uuid(namespace: str, name: str, stored_uuid: str = "") -> str:
+    if stored_uuid:
+        return stored_uuid
     return str(uuid.uuid5(CATALOG_UUID_NAMESPACE, f"{namespace}.{name}"))
 
 
@@ -183,7 +185,7 @@ def saved_dataset_to_load_table_response(
 
     metadata = TableMetadata(  # type: ignore[call-arg]
         format_version=2,
-        table_uuid=_make_uuid(namespace, display_name),
+        table_uuid=_make_uuid(namespace, display_name, ds.tags.get("_asset_uuid", "")),
         location=location,
         last_updated_ms=last_updated,
         properties=properties,
@@ -193,8 +195,16 @@ def saved_dataset_to_load_table_response(
         last_sequence_number=0,
     )
 
+    stored_meta_location = ds.tags.get("metadata_location", "")
+    if stored_meta_location:
+        meta_location = stored_meta_location
+    elif location.startswith("s3://"):
+        meta_location = f"{location.rstrip('/')}/metadata/"
+    else:
+        meta_location = f"feast://{namespace}/tables/{display_name}/metadata"
+
     return LoadTableResponse(  # type: ignore[call-arg]
-        metadata_location=f"feast://{namespace}/tables/{display_name}/metadata",
+        metadata_location=meta_location,
         metadata=metadata,
     )
 
