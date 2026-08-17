@@ -108,3 +108,20 @@ def add_catalog_routes(app: FastAPI, store: FeatureStore) -> None:
         ensure_catalog_project(store)
         namespace_names = sorted(list_rhai_namespaces(store))
         return {"projects": namespace_names}
+
+    @app.get(f"{prefix}/{{project}}/tags")
+    async def list_project_tags(project: str):
+        from feast.api.catalog.mapping import CATALOG_PROJECT, ensure_catalog_project
+
+        ensure_catalog_project(store)
+        datasets = store.registry.list_saved_datasets(
+            project=CATALOG_PROJECT,
+            allow_cache=False,
+            namespace=project,
+        )
+        all_tags: set[str] = set()
+        for ds in datasets:
+            raw = ds.tags.get("_tags", "")
+            if raw:
+                all_tags.update(t for t in raw.split(",") if t)
+        return {"tags": sorted(all_tags)}

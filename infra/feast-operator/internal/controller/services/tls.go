@@ -166,6 +166,9 @@ func (feast *FeastServices) uiOpenshiftTls() bool {
 
 // True if running in an openshift cluster and Tls not configured in the service Spec
 func (feast *FeastServices) localRegistryOpenshiftTls() bool {
+	if feast.IsCatalogMode() {
+		return false
+	}
 	return isOpenShift &&
 		feast.isRegistryServer() && feast.Handler.FeatureStore.Spec.Services.Registry.Local.Server.TLS == nil
 }
